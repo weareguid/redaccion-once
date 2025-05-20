@@ -559,22 +559,24 @@ with tab1:
                     )
 
                     system_prompt = f"""Eres un asistente experto en redacción periodística, especializado en {selected_category} y {selected_subcategory}. 
-                    Tu objetivo es ayudar a crear contenido profesional, bien estructurado y atractivo para los lectores. 
-                    El contenido debe ser preciso, informativo y relevante para el área de {selected_category} y {selected_subcategory}.
+Tu objetivo es ayudar a crear contenido profesional, bien estructurado y atractivo para los lectores. 
+El contenido debe ser preciso, informativo y relevante para el área de {selected_category} y {selected_subcategory}.
 
-                    {text_type_instruction[selected_text_type]}
-                    {length_instruction[length_options[selected_length]]}
-                    {writing_guidelines}
-                    {examples_section}
-                    {sources_section}
+SIEMPRE incluye un título al inicio de cada nota, artículo, crónica, etc., a menos que el usuario especifique lo contrario.
 
-                    Recuerda:
-                    - Revisar el texto antes de entregarlo
-                    - Asegurar que cumple con todos los requisitos especificados
-                    - Mantener un estilo consistente y profesional
-                    - Verificar que la información sea precisa y relevante
-                    - Evitar errores comunes de redacción
-                    """
+{text_type_instruction[selected_text_type]}
+{length_instruction[length_options[selected_length]]}
+{writing_guidelines}
+{examples_section}
+{sources_section}
+
+Recuerda:
+- Revisar el texto antes de entregarlo
+- Asegurar que cumple con todos los requisitos especificados
+- Mantener un estilo consistente y profesional
+- Verificar que la información sea precisa y relevante
+- Evitar errores comunes de redacción
+"""
 
                     response = client.chat.completions.create(
                         model="gpt-4-turbo-preview",
