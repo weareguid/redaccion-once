@@ -436,6 +436,7 @@ with tab1:
         value=st.session_state.sources_input,
         placeholder="Ingresa las fuentes, referencias o datos específicos que deseas incluir en el texto..."
     )
+    st.caption("Nota: Las fuentes proporcionadas son solo para investigación y referencia. Nunca deben ser copiadas directamente en el contenido generado.")
 
     # Update session state with the current sources input
     st.session_state.sources_input = sources_prompt
