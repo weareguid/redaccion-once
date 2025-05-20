@@ -921,13 +921,11 @@ def prepare_training_data():
         st.error(f"Error preparing training data: {str(e)}")
         return False
 
-# Function to train model using Snowflake ML
 def train_model():
     try:
         conn = get_snowflake_connection()
         if conn:
             cur = conn.cursor()
-            
             # Create training procedure
             cur.execute("""
                 CREATE OR REPLACE PROCEDURE train_text_model()
@@ -954,12 +952,10 @@ def train_model():
                         text_type_embedding
                     FROM ml_features
                     WHERE rating >= 4;
-                    
                     -- Get model ID
                     SELECT model_id INTO :model_id
                     FROM TABLE(INFORMATION_SCHEMA.MODELS)
                     WHERE model_name = 'text_generation_model';
-                    
                     -- Insert metrics into model_metrics table
                     INSERT INTO model_metrics (
                         model_name,
@@ -974,16 +970,13 @@ def train_model():
                         0.82
                     FROM TABLE(INFORMATION_SCHEMA.MODELS)
                     WHERE model_name = 'text_generation_model';
-                    
                     RETURN model_id;
                 END;
                 $$
             """)
-            
             # Execute training
             cur.execute("CALL train_text_model()")
             model_id = cur.fetchone()[0]
-            
             conn.close()
             return model_id
     except Exception as e:
