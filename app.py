@@ -549,6 +549,12 @@ with tab1:
                     if sources_prompt:
                         sources_section = f"\n\nFuentes y referencias a incluir:\n{sources_prompt}"
 
+                    # Add violence guidelines prompt
+                    PROMPT_VIOLENCIA = (
+                        "Recuerda seguir las mejores prácticas para el tratamiento de temas de violencia: "
+                        "evita detalles explícitos, prioriza el respeto a las víctimas, y utiliza un lenguaje responsable."
+                    )
+
                     system_prompt = f"""Eres un asistente experto en redacción periodística, especializado en {selected_category} y {selected_subcategory}. 
                     Tu objetivo es ayudar a crear contenido profesional, bien estructurado y atractivo para los lectores. 
                     El contenido debe ser preciso, informativo y relevante para el área de {selected_category} y {selected_subcategory}.
@@ -571,6 +577,7 @@ with tab1:
                         model="gpt-4-turbo-preview",
                         messages=[
                             {"role": "system", "content": system_prompt},
+                            {"role": "system", "content": PROMPT_VIOLENCIA},
                             {"role": "user", "content": user_prompt}
                         ]
                     )
