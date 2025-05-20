@@ -71,18 +71,32 @@ def setup_snowflake():
         
         # Grant permissions
         print("Setting up permissions...")
-        # First, create the role if it doesn't exist
-        cur.execute(f"CREATE ROLE IF NOT EXISTS {st.secrets['SNOWFLAKE']['user']}")
+        # Create a dedicated role for the application
+        app_role = "REDACCION_ONCE_ROLE"
+        cur.execute(f"CREATE ROLE IF NOT EXISTS {app_role}")
         
-        # Then grant permissions
-        cur.execute(f"GRANT USAGE ON WAREHOUSE {st.secrets['SNOWFLAKE']['warehouse']} TO ROLE {st.secrets['SNOWFLAKE']['user']}")
-        cur.execute(f"GRANT USAGE ON DATABASE {st.secrets['SNOWFLAKE']['database']} TO ROLE {st.secrets['SNOWFLAKE']['user']}")
-        cur.execute(f"GRANT USAGE ON SCHEMA {st.secrets['SNOWFLAKE']['schema']} TO ROLE {st.secrets['SNOWFLAKE']['user']}")
-        cur.execute(f"GRANT CREATE TABLE ON SCHEMA {st.secrets['SNOWFLAKE']['schema']} TO ROLE {st.secrets['SNOWFLAKE']['user']}")
-        cur.execute(f"GRANT CREATE VIEW ON SCHEMA {st.secrets['SNOWFLAKE']['schema']} TO ROLE {st.secrets['SNOWFLAKE']['user']}")
+        # Grant permissions to the application role
+        cur.execute(f"GRANT USAGE ON WAREHOUSE {st.secrets['SNOWFLAKE']['warehouse']} TO ROLE {app_role}")
+        cur.execute(f"GRANT USAGE ON DATABASE {st.secrets['SNOWFLAKE']['database']} TO ROLE {app_role}")
+        cur.execute(f"GRANT USAGE ON SCHEMA {st.secrets['SNOWFLAKE']['schema']} TO ROLE {app_role}")
+        cur.execute(f"GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA {st.secrets['SNOWFLAKE']['schema']} TO ROLE {app_role}")
+        cur.execute(f"GRANT SELECT ON ALL VIEWS IN SCHEMA {st.secrets['SNOWFLAKE']['schema']} TO ROLE {app_role}")
         
         # Grant the role to the user
-        cur.execute(f"GRANT ROLE {st.secrets['SNOWFLAKE']['user']} TO USER {st.secrets['SNOWFLAKE']['user']}")
+        cur.execute(f"GRANT ROLE {app_role} TO USER {st.secrets['SNOWFLAKE']['user']}")
+        
+        # Update the secrets.toml with the new role
+        print("Updating secrets.toml with the new role...")
+        secrets_path = ".streamlit/secrets.toml"
+        if os.path.exists(secrets_path):
+            with open(secrets_path, 'r') as f:
+                secrets_content = f.read()
+            
+            # Update the role in the secrets file
+            secrets_content = secrets_content.replace('role = "ACCOUNTADMIN"', f'role = "{app_role}"')
+            
+            with open(secrets_path, 'w') as f:
+                f.write(secrets_content)
         
         conn.commit()
         print("Snowflake setup completed successfully!")
