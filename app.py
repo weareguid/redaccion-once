@@ -804,7 +804,7 @@ with tab3:
             if not metrics_df.empty:
                 st.metric("Precisión de Entrenamiento", f"{metrics_df['training_accuracy'].iloc[0]:.2%}")
                 st.metric("Precisión de Validación", f"{metrics_df['validation_accuracy'].iloc[0]:.2%}")
-                st.metric("Última Actualización", metrics_df['last_updated'].iloc[0])
+                st.metric("Última Actualización", str(metrics_df['last_updated'].iloc[0]))
             else:
                 st.info("No hay métricas disponibles para el modelo.")
     except Exception as e:
