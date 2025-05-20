@@ -184,12 +184,8 @@ def save_feedback(rating, comments, generated_text, metadata):
         conn = get_snowflake_connection()
         if conn:
             cur = conn.cursor()
-            
-            # Use the database and schema
             cur.execute(f"USE DATABASE {st.secrets['SNOWFLAKE']['database']}")
             cur.execute(f"USE SCHEMA {st.secrets['SNOWFLAKE']['schema']}")
-            
-            # Create DataFrame for feedback
             feedback_df = pd.DataFrame([{
                 'timestamp': datetime.datetime.now(),
                 'rating': int(rating),
@@ -203,8 +199,7 @@ def save_feedback(rating, comments, generated_text, metadata):
                 'style': str(metadata['style']),
                 'additional_instructions': str(metadata['additional_instructions'])
             }])
-            
-            # Write to Snowflake
+            print("Attempting to write feedback to Snowflake:", feedback_df)
             success, nchunks, nrows, _ = snowflake.connector.pandas_tools.write_pandas(
                 conn,
                 feedback_df,
@@ -212,11 +207,12 @@ def save_feedback(rating, comments, generated_text, metadata):
                 auto_create_table=False,
                 overwrite=False
             )
-            
+            print("Write result:", success, nchunks, nrows)
             conn.close()
             return success
     except Exception as e:
         st.error(f"Error saving feedback to Snowflake: {str(e)}")
+        print("Error saving feedback to Snowflake:", str(e))
         return False
 
 # Function to get feedback history from Snowflake
