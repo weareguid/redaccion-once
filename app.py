@@ -1020,3 +1020,20 @@ def get_model_predictions(category, subcategory, text_type, length):
     except Exception as e:
         st.error(f"Error getting predictions: {str(e)}")
         return None
+
+# Add a sidebar button to test Snowflake connection and show current database/schema/user
+with st.sidebar:
+    if st.button("Test Snowflake Connection"):
+        try:
+            conn = get_snowflake_connection()
+            if conn:
+                cur = conn.cursor()
+                cur.execute("SELECT CURRENT_DATABASE(), CURRENT_SCHEMA(), CURRENT_USER()")
+                result = cur.fetchone()
+                st.success(f"Connected! Database: {result[0]}, Schema: {result[1]}, User: {result[2]}")
+                cur.close()
+                conn.close()
+            else:
+                st.error("Could not establish a Snowflake connection.")
+        except Exception as e:
+            st.error(f"Connection failed: {e}")
