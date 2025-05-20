@@ -293,8 +293,10 @@ def create_pdf_doc(text):
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", size=12)
+    # Replace unsupported characters (like en dash) with hyphen
+    safe_text = text.replace("–", "-")
     # Split text into lines that fit the page width
-    lines = text.split('\n')
+    lines = safe_text.split('\n')
     for line in lines:
         pdf.multi_cell(0, 10, txt=line)
     return pdf
