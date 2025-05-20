@@ -1,0 +1,15 @@
+artifact_uri: file:///Users/rodrigogarciaresendiz/Desktop/NOBANOFI/Redaccion/mlruns/0/0fbfcb6be7774d6694b74e827d7d3608/artifacts
+end_time: null
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 0fbfcb6be7774d6694b74e827d7d3608
+run_name: models
+run_uuid: 0fbfcb6be7774d6694b74e827d7d3608
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1746826156921
+status: 1
+tags: []
+user_id: rodrigogarciaresendiz
