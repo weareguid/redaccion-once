@@ -255,7 +255,7 @@ def get_feedback_analytics():
                 query = text("""
                     SELECT *
                     FROM feedback_analytics
-                    ORDER BY date DESC
+                    ORDER BY last_feedback_time DESC
                 """)
                 df = pd.read_sql(query, conn)
                 return df
