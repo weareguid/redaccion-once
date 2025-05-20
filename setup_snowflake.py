@@ -64,7 +64,8 @@ def setup_snowflake():
                 style,
                 AVG(rating) as avg_rating,
                 COUNT(*) as feedback_count,
-                COUNT(CASE WHEN rating >= 4 THEN 1 END) as positive_feedback_count
+                COUNT(CASE WHEN rating >= 4 THEN 1 END) as positive_feedback_count,
+                MAX(timestamp) as last_feedback_time
             FROM feedback
             GROUP BY category, text_type, length, tone, style
         """)
