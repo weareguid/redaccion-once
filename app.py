@@ -187,7 +187,6 @@ def save_feedback(rating, comments, generated_text, metadata):
             cur.execute(f"USE DATABASE {st.secrets['SNOWFLAKE']['database']}")
             cur.execute(f"USE SCHEMA {st.secrets['SNOWFLAKE']['schema']}")
             feedback_df = pd.DataFrame([{
-                'timestamp': datetime.datetime.now(),
                 'rating': int(rating),
                 'comments': str(comments),
                 'generated_text': str(generated_text),
@@ -203,7 +202,7 @@ def save_feedback(rating, comments, generated_text, metadata):
             success, nchunks, nrows, _ = snowflake.connector.pandas_tools.write_pandas(
                 conn,
                 feedback_df,
-                'FEEDBACK',
+                'FEEDBACK.PUBLIC.FEEDBACK',
                 auto_create_table=False,
                 overwrite=False
             )
@@ -226,6 +225,7 @@ def get_feedback_history():
                         timestamp,
                         rating,
                         comments,
+                        generated_text,
                         category,
                         text_type,
                         length,
@@ -233,7 +233,7 @@ def get_feedback_history():
                         tone,
                         style,
                         additional_instructions
-                    FROM feedback
+                    FROM FEEDBACK.PUBLIC.FEEDBACK
                     ORDER BY timestamp DESC
                 """)
                 df = pd.read_sql(query, conn)
