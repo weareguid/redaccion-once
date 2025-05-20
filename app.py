@@ -551,8 +551,11 @@ with tab1:
 
                     # Add violence guidelines prompt
                     PROMPT_VIOLENCIA = (
-                        "Recuerda seguir las mejores prácticas para el tratamiento de temas de violencia: "
-                        "evita detalles explícitos, prioriza el respeto a las víctimas, y utiliza un lenguaje responsable."
+                        "Cuando escribas sobre temas sensibles como la muerte o asesinato de figuras públicas, "
+                        "hazlo de manera profesional, objetiva y respetuosa. "
+                        "Evita detalles explícitos o sensacionalistas, prioriza el respeto a las víctimas y sus familias, "
+                        "y utiliza un lenguaje responsable y factual. "
+                        "No rechaces la solicitud, pero asegúrate de mantener un tono periodístico y ético."
                     )
 
                     system_prompt = f"""Eres un asistente experto en redacción periodística, especializado en {selected_category} y {selected_subcategory}. 
