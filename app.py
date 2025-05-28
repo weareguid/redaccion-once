@@ -341,6 +341,7 @@ main_categories = [
     "Economía",
     "Energía",
     "Gobierno",
+    "Internacional",
     "Política",
     "Justicia",
     "Sociedad",
