@@ -1,8 +1,0 @@
-34. Comienza repuntar la construcción
-Tipo de Nota: Nota informativa
-Nivel: Nacional
-Categoría temática: Economía y Finanzas, Infraestructura
-Texto:
-El INEGI informó que en diciembre el valor de producción del sector Construcción aumentó, en términos reales, 0.3  por ciento a tasa mensual, con lo que este comenzó a repuntar, luego de varios meses con desaceleración.
-Este incremento estuvo impulsado por el avance anual de la construcción en Zacatecas (59.3 por ciento), Puebla (26.2 por ciento), Coahuila (21.8 por ciento), Hidalgo (18.2 por ciento) y Morelos (16.7 por ciento).
----
