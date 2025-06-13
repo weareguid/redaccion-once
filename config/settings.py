@@ -28,14 +28,14 @@ class OnceNoticiasConfig:
     METRICS_RETENTION_DAYS = 90
     ENABLE_WEEKLY_ANALYSIS = False
 
-    # ✅ NUEVO: Configuración de almacenamiento
-    ENABLE_DATABASE_STORAGE = False  # Snowflake opcional
-    LOCAL_STORAGE_ENABLED = True     # Almacenamiento local por defecto
+    # ✅ ACTUALIZADO: Configuración de almacenamiento
+    ENABLE_DATABASE_STORAGE = True  # Snowflake opcional
+    LOCAL_STORAGE_ENABLED = True    # ✅ HABILITADO como fallback
     LOCAL_STORAGE_PATH = "data/metrics/"  # Carpeta para métricas locales
 
     # Configuración de datos externos (para versiones futuras)
     DATA_INJECTION_ENABLED = False
-    WEB_SEARCH_ENABLED = False
+    WEB_SEARCH_ENABLED = True  # ✅ HABILITADO para web search
 
     # Configuración de base de datos (solo si está habilitada)
     DATABASE_TABLE = "content_generation_log_optimized"

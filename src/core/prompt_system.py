@@ -42,18 +42,24 @@ class OptimizedOnceNoticiasPromptSystem:
         if self.local_storage:
             os.makedirs(self.storage_path, exist_ok=True)
 
-        # Importar conexión a DB solo si es necesario
+        # ✅ ACTUALIZADO: Usar el nuevo módulo de conexión a DB
         self.db_connection = None
         if self.enable_database:
             try:
-                from src.utils.database_connection import get_database_connection
+                from src.utils.database_connection import get_database_connection, save_content_metrics
                 self.db_connection = get_database_connection()
-            except ImportError:
-                print("⚠️ Base de datos no disponible, usando almacenamiento local")
+                self.save_content_metrics = save_content_metrics
+                if self.db_connection:
+                    print("✅ Conexión a base de datos establecida")
+                else:
+                    print("⚠️ No se pudo conectar a la base de datos, usando almacenamiento local")
+                    self.enable_database = False
+            except ImportError as e:
+                print(f"⚠️ Módulo de base de datos no disponible: {e}")
                 self.enable_database = False
 
         # ✅ NUEVO: Web Search habilitado
-        self.web_search_enabled = True
+        self.web_search_enabled = config.WEB_SEARCH_ENABLED
 
         # OPTIMIZACIÓN 1: Voz de marca compacta
         self.brand_voice = [
@@ -252,7 +258,11 @@ class OptimizedOnceNoticiasPromptSystem:
         }
 
         # OPTIMIZACIÓN 7: Formato citación estándar
-        self.citation_format = "Fuente: {institucion}, {año}"
+        self.citation_format = {
+            "format": "APA",
+            "include_access_date": True,
+            "require_url": True
+        }
 
         # OPTIMIZACIÓN 5: Filtros de seguridad
         self.security_patterns = [
@@ -268,19 +278,15 @@ class OptimizedOnceNoticiasPromptSystem:
         self.data_injection_enabled = False
         self.external_apis = {}
 
-        # OPTIMIZACIÓN 9: Métricas automatizadas
+        # Métricas de optimización
         self.metrics = {
-            "total_prompts": 0,
             "avg_tokens_per_prompt": 0,
+            "total_prompts": 0,
+            "total_generations": 0,
             "data_injection_hits": 0,
             "security_blocks": 0,
-            "regenerations": 0,
-            "total_generations": 0,
             "sensitive_topics_detected": 0,
-            "performance": {
-                "avg_tokens": 0,
-                "quality_score": 0
-            }
+            "regenerations": 0
         }
 
     def enable_data_injection(self, api_keys: Dict[str, str]):
@@ -732,70 +738,40 @@ ENFOQUE: {category_config.get('enfoque', '')}
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
-    def save_to_database(self, content_data: Dict[str, Any]) -> bool:
+    def save_to_database(self, content_data: Dict[str, Any]) -> Optional[int]:
         """
         Guarda datos con almacenamiento opcional
 
         Returns:
-            bool: True si se guardó correctamente
+            int: ID del registro si se guardó en database, o None si solo local/falló
         """
-        success = False
+        record_id = None
 
         # Intentar guardar en base de datos si está habilitada
         if self.enable_database and self.db_connection:
             try:
-                success = self._save_to_snowflake(content_data)
-                if success:
+                # ✅ ACTUALIZADO: Usar el nuevo método que devuelve ID
+                record_id = self.save_content_metrics(content_data)
+                if record_id:
                     print("✅ Datos guardados en Snowflake")
             except Exception as e:
                 print(f"⚠️ Error en Snowflake: {e}")
                 print("Guardando en almacenamiento local...")
 
         # Guardar localmente como respaldo o método principal
-        if self.local_storage and (not success or not self.enable_database):
+        if self.local_storage and (not record_id or not self.enable_database):
             try:
                 local_success = self._save_locally(content_data)
                 if local_success:
-                    success = True
                     print("✅ Datos guardados localmente")
             except Exception as e:
                 print(f"❌ Error al guardar localmente: {e}")
 
-        return success
+        return record_id
 
     def _save_to_snowflake(self, content_data: Dict[str, Any]) -> bool:
-        """Guarda en Snowflake (método original)"""
-        if not self.db_connection:
-            return False
-
-        try:
-            cursor = self.db_connection.cursor()
-
-            insert_query = f"""
-            INSERT INTO {config.DATABASE_TABLE}
-            (user_prompt, category, subcategory, text_type, generated_content,
-             quality_score, created_at, token_count, optimization_version)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """
-
-            cursor.execute(insert_query, (
-                content_data.get('user_prompt', ''),
-                content_data.get('category', ''),
-                content_data.get('subcategory', ''),
-                content_data.get('text_type', ''),
-                content_data.get('generated_content', ''),
-                content_data.get('quality_score', 0),
-                datetime.now(timezone.utc),
-                content_data.get('token_count', 0),
-                "2.0.0"
-            ))
-
-            cursor.close()
-            return True
-
-        except Exception as e:
-            print(f"Error en Snowflake: {e}")
-            return False
+        """Método deprecado - usar save_content_metrics"""
+        return self.save_content_metrics(content_data) if hasattr(self, 'save_content_metrics') else False
 
     def _save_locally(self, content_data: Dict[str, Any]) -> bool:
         """Guarda métricas localmente como JSON"""
@@ -830,8 +806,8 @@ ENFOQUE: {category_config.get('enfoque', '')}
 
     def get_storage_status(self) -> Dict[str, str]:
         """Devuelve estado del almacenamiento"""
-        if self.enable_database:
-            return {"mode": "database", "status": "✅ Snowflake activo"}
+        if self.enable_database and self.db_connection:
+            return {"mode": "database", "status": "✅ Snowflake conectado"}
         elif self.local_storage:
             return {"mode": "local", "status": f"📁 Local: {self.storage_path}"}
         else:
@@ -916,8 +892,15 @@ ENFOQUE: {category_config.get('enfoque', '')}
         content = ""
         citations = []
         web_search_used = False
+        openai_call_id = ""
 
         try:
+            # ✅ Extract OpenAI call ID
+            if hasattr(response, 'id'):
+                openai_call_id = response.id
+            elif hasattr(response, 'response_id'):
+                openai_call_id = response.response_id
+
             # La estructura correcta es response.output[1].content[0]
             if hasattr(response, 'output') and response.output:
                 # Buscar el mensaje de respuesta en el output
@@ -973,12 +956,14 @@ ENFOQUE: {category_config.get('enfoque', '')}
             print(f"Contenido extraído: {len(content)} caracteres")
             print(f"Citaciones encontradas: {len(citations)}")
             print(f"Web search usado: {web_search_used}")
+            print(f"OpenAI call ID: {openai_call_id}")
 
             return {
                 "content": content,
                 "citations": citations,
                 "token_count": int(token_count),
-                "web_search_used": web_search_used
+                "web_search_used": web_search_used,
+                "openai_call_id": openai_call_id
             }
 
         except Exception as e:
@@ -987,7 +972,8 @@ ENFOQUE: {category_config.get('enfoque', '')}
                 "content": "Error al extraer contenido - usando fallback",
                 "citations": [],
                 "token_count": 0,
-                "web_search_used": False
+                "web_search_used": False,
+                "openai_call_id": openai_call_id
             }
 
     def _generate_fallback_content(self, category: str, subcategory: str, text_type: str,
@@ -1016,11 +1002,17 @@ ENFOQUE: {category_config.get('enfoque', '')}
                 top_p=config.OPENAI_TOP_P
             )
 
+            # ✅ Extract OpenAI call ID
+            openai_call_id = response.id if hasattr(response, 'id') else ""
+
+            print(f"OpenAI call ID (fallback): {openai_call_id}")
+
             return {
                 "content": response.choices[0].message.content,
                 "citations": [],
                 "token_count": response.usage.total_tokens,
-                "web_search_used": False
+                "web_search_used": False,
+                "openai_call_id": openai_call_id
             }
 
         except Exception as e:
@@ -1028,7 +1020,8 @@ ENFOQUE: {category_config.get('enfoque', '')}
                 "content": f"Error generando contenido: {str(e)}",
                 "citations": [],
                 "token_count": 0,
-                "web_search_used": False
+                "web_search_used": False,
+                "openai_call_id": ""
             }
 
     def generate_improvement_with_web_search(self, category: str, subcategory: str, text_type: str,
@@ -1126,11 +1119,17 @@ CONTEXTO: Esta es una mejora iterativa que debe mantener TODOS los lineamientos 
                 top_p=config.OPENAI_TOP_P
             )
 
+            # ✅ Extract OpenAI call ID
+            openai_call_id = response.id if hasattr(response, 'id') else ""
+
+            print(f"OpenAI call ID (improvement fallback): {openai_call_id}")
+
             return {
                 "content": response.choices[0].message.content,
                 "citations": [],
                 "token_count": response.usage.total_tokens,
-                "web_search_used": False
+                "web_search_used": False,
+                "openai_call_id": openai_call_id
             }
 
         except Exception as e:
@@ -1138,5 +1137,6 @@ CONTEXTO: Esta es una mejora iterativa que debe mantener TODOS los lineamientos 
                 "content": f"Error generando mejora: {str(e)}",
                 "citations": [],
                 "token_count": 0,
-                "web_search_used": False
+                "web_search_used": False,
+                "openai_call_id": ""
             }

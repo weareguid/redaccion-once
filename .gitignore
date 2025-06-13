@@ -31,41 +31,77 @@ env/
 *.swp
 *.swo
 
-<<<<<<< HEAD
-# Streamlit
+# ===== SENSITIVE FILES - NEVER COMMIT =====
+# Streamlit secrets (contains API keys)
+config/.streamlit/secrets.toml
 .streamlit/secrets.toml
 
-# Logs
-*.log
-logs/
-
-# Local development
+# Environment files with secrets
 .env
 .env.local
 .env.*.local
+.env.production
 
-# OS
-.DS_Store
-Thumbs.db 
-=======
-# AWS
-.aws_instance
+# API Keys and credentials
+*.key
 *.pem
+credentials.json
+service-account.json
 
-# Logs
+# ===== DEPLOYMENT FILES - SAFE TO COMMIT =====
+# These files are safe to commit (no secrets)
+# .streamlit/config.toml - OK (no secrets)
+# requirements_deploy.txt - OK (no secrets)
+# Dockerfile - OK (no secrets)
+# Procfile - OK (no secrets)
+# runtime.txt - OK (no secrets)
+# DEPLOYMENT.md - OK (no secrets)
+
+# ===== LOGS AND TEMPORARY FILES =====
 *.log
+logs/
 monitoring.log
 training.log
 
-# Model files
+# ===== MODEL FILES =====
 model_training/models/
 *.pt
 *.pth
 *.bin
-
-# OS
-.DS_Store
-Thumbs.db models/
-models/
 *.safetensors
->>>>>>> f0d112154d2fd15efb5f864495819b65d9c6b028
+models/
+
+# ===== DATA AND METRICS =====
+data/metrics/*.json
+data/metrics/*.csv
+data/local_storage/
+
+# ===== AWS AND CLOUD =====
+.aws_instance
+*.pem
+
+# ===== OS FILES =====
+.DS_Store
+Thumbs.db
+
+# ===== TESTING AND DEVELOPMENT =====
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+
+# ===== DEPLOYMENT ARTIFACTS =====
+# Docker
+.dockerignore
+
+# Heroku
+.heroku/
+
+# Temporary deployment files
+deploy_temp/
+build_temp/

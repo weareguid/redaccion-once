@@ -11,6 +11,7 @@ import openai
 from datetime import datetime
 from typing import Dict, Any
 import json
+import time
 
 # Librerías para exportación
 try:
@@ -66,6 +67,47 @@ def initialize_system():
     qa_system = OnceNoticiasQualityAssurance()
 
     return prompt_system, qa_system
+
+def save_new_content_metrics(prompt_system, content_data, user_rating=None):
+    """
+    Guarda métricas para contenido NUEVO generado por LLM - crea nuevo registro
+
+    Returns:
+        int: ID del registro creado, o None si falló
+    """
+    # Preparar datos completos para guardado
+    complete_data = {
+        **content_data,
+        'user_rating': user_rating,
+        'sources_prompt': content_data.get('user_sources', ''),
+        'generated_content': content_data.get('content', ''),
+        'word_count': len(content_data.get('content', '').split()) if content_data.get('content') else 0,
+        'improvement_applied': content_data.get('improvement_applied', False),
+        'web_search_used': content_data.get('web_search_used', False),
+        'web_search_sources_count': len(content_data.get('citations', [])),
+        'citations_data': json.dumps(content_data.get('citations', []), ensure_ascii=False),
+        'generation_time_seconds': content_data.get('generation_time', 0),
+        'tokens_used': content_data.get('token_count', 0),
+        'openai_call_id': content_data.get('openai_call_id', '')  # ✅ Add OpenAI call ID
+    }
+
+    # Guardar usando el sistema de prompt - esto devuelve el ID del registro
+    return prompt_system.save_to_database(complete_data)
+
+def update_content_rating_only(record_id, user_rating, user_feedback=None):
+    """
+    Actualiza solo el rating de un contenido existente - NO crea nuevo registro
+    """
+    from src.utils.database_connection import update_content_rating
+    return update_content_rating(record_id, user_rating, user_feedback)
+
+def update_content_rating_by_openai_id(openai_call_id, user_rating):
+    """
+    Actualiza el rating de un contenido existente usando OpenAI call ID
+    ✅ MULTI-USER SAFE: Uses OpenAI call ID instead of record ID
+    """
+    from src.utils.database_connection import update_content_rating_by_openai_id
+    return update_content_rating_by_openai_id(openai_call_id, user_rating)
 
 def display_content_with_citations(content: str, citations: list, user_sources: str = ""):
     """
@@ -161,8 +203,6 @@ def create_word_document(content: str, metadata: Dict) -> io.BytesIO:
     info_para.add_run(f"{metadata.get('text_type', '')}\n")
     info_para.add_run(f"Fecha: ").bold = True
     info_para.add_run(f"{datetime.now().strftime('%d/%m/%Y %H:%M')}\n")
-    info_para.add_run(f"Calidad: ").bold = True
-    info_para.add_run(f"{metadata.get('quality_score', 0)}%\n")
     info_para.add_run(f"Tokens: ").bold = True
     info_para.add_run(f"{metadata.get('token_count', 0):,}")
 
@@ -241,7 +281,6 @@ def create_pdf_document(content: str, metadata: Dict) -> io.BytesIO:
     story.append(Paragraph(f"<b>Categoría:</b> {metadata.get('category', '')} / {metadata.get('subcategory', '')}", metadata_style))
     story.append(Paragraph(f"<b>Tipo:</b> {metadata.get('text_type', '')}", metadata_style))
     story.append(Paragraph(f"<b>Fecha:</b> {datetime.now().strftime('%d/%m/%Y %H:%M')}", metadata_style))
-    story.append(Paragraph(f"<b>Calidad:</b> {metadata.get('quality_score', 0)}%", metadata_style))
     story.append(Paragraph(f"<b>Tokens:</b> {metadata.get('token_count', 0):,}", metadata_style))
     story.append(Spacer(1, 30))
 
@@ -345,28 +384,29 @@ def main():
 
             st.info("💡 El almacenamiento local siempre está disponible como respaldo")
 
-    # Input principal
+    # Usar formulario para Ctrl+Enter en input principal
     st.subheader("✍️ Solicitud Editorial")
-    user_prompt = st.text_area(
-        "Describe el contenido que necesitas generar:",
-        height=100,
-        placeholder="Ejemplo: Análisis del impacto de las nuevas políticas comerciales en el sector energético mexicano..."
-    )
 
-    # ✅ NUEVO: Campo para fuentes y referencias
-    st.subheader("📚 Fuentes y Referencias (Opcional)")
-    user_sources = st.text_area(
-        "Comparte fuentes, links, datos o referencias específicas:",
-        height=80,
-        placeholder="Ejemplo: Reporte INEGI 2024, https://example.com/data, cifras del Banco de México, estudio de la UNAM sobre energías renovables...",
-        help="Estas fuentes se integrarán al contenido junto con la búsqueda web automática"
-    )
+    with st.form("content_generation_form", clear_on_submit=False):
+        user_prompt = st.text_area(
+            "Describe el contenido que necesitas generar:",
+            height=100,
+            placeholder="Ejemplo: Análisis del impacto de las nuevas políticas comerciales en el sector energético mexicano...",
+            help="💡 Tip: Usa Ctrl+Enter para generar contenido directamente"
+        )
 
-    # Botón de generación
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        generate_button = st.button(
-            "🚀 Generar Contenido Optimizado",
+        # Campo para fuentes y referencias
+        st.subheader("📚 Fuentes y Referencias (Opcional)")
+        user_sources = st.text_area(
+            "Comparte fuentes, links, datos o referencias específicas:",
+            height=80,
+            placeholder="Ejemplo: Reporte INEGI 2024, https://example.com/data, cifras del Banco de México, estudio de la UNAM sobre energías renovables...",
+            help="Estas fuentes se integrarán al contenido junto con la búsqueda web automática"
+        )
+
+        # Botón de generación dentro del formulario
+        generate_button = st.form_submit_button(
+            "🚀 Generar Contenido",
             type="primary",
             use_container_width=True
         )
@@ -374,9 +414,12 @@ def main():
     # Procesamiento de la solicitud
     if generate_button and user_prompt:
 
-        with st.spinner("🔄 Generando contenido optimizado..."):
+        with st.spinner("🔄 Generando contenido..."):
 
             try:
+                # Marcar tiempo de inicio
+                start_time = time.time()
+
                 # Determinar si usar Web Search basado en la selección del usuario
                 force_web_search = get_web_search_setting()
 
@@ -391,34 +434,58 @@ def main():
                     force_web_search=force_web_search
                 )
 
+                # Calcular tiempo de generación
+                generation_time = time.time() - start_time
+
                 generated_content = content_data.get("content", "")
                 token_count = content_data.get("token_count", 0)
                 citations = content_data.get("citations", [])
                 web_search_used = content_data.get("web_search_used", False)
 
+                # Preparar datos completos para guardar
+                complete_content_data = {
+                    **content_data,
+                    "user_prompt": user_prompt,
+                    "user_sources": user_sources,
+                    "category": category,
+                    "subcategory": subcategory,
+                    "text_type": text_type,
+                    "selected_length": selected_length,
+                    "generation_time": generation_time,
+                    "improvement_applied": False
+                }
+
+                # ✅ GUARDAR NUEVO CONTENIDO - crea nuevo registro
+                record_id = save_new_content_metrics(prompt_system, complete_content_data, user_rating=None)
+
                 # Guardar en session_state para flujo iterativo
                 st.session_state.current_content = generated_content
                 st.session_state.current_metadata = {
                     "user_prompt": user_prompt,
-                    "user_sources": user_sources,  # ✅ Guardar fuentes del usuario
+                    "user_sources": user_sources,
                     "category": category,
                     "subcategory": subcategory,
                     "text_type": text_type,
                     "token_count": token_count,
                     "length_setting": selected_length,
                     "citations": citations,
-                    "web_search_used": web_search_used
+                    "web_search_used": web_search_used,
+                    "generation_time": generation_time,
+                    "record_id": record_id,  # ✅ GUARDAR EL ID DEL REGISTRO
+                    "openai_call_id": content_data.get("openai_call_id", "")  # ✅ TRACK OPENAI CALL ID
                 }
                 st.session_state.iteration_count = 1
 
-                # ✅ NUEVO: Inicializar historial de iteraciones
+                # Inicializar historial de iteraciones
                 st.session_state.iteration_history = {
                     1: {
                         "content": generated_content,
                         "metadata": st.session_state.current_metadata.copy(),
                         "timestamp": datetime.now().isoformat(),
                         "feedback_applied": "Contenido inicial",
-                        "web_search_config": st.session_state.get('web_search_mode', '🤖 Auto (recomendado)')
+                        "web_search_config": st.session_state.get('web_search_mode', '🤖 Auto (recomendado)'),
+                        "record_id": record_id,  # ✅ GUARDAR EL ID EN EL HISTORIAL
+                        "openai_call_id": content_data.get("openai_call_id", "")  # ✅ TRACK OPENAI CALL ID
                     }
                 }
                 st.session_state.current_iteration = 1
@@ -446,7 +513,7 @@ def main():
         with content_container:
             st.markdown("---")
 
-            # ✅ SELECTOR DE ITERACIONES
+            # SELECTOR DE ITERACIONES
             if hasattr(st.session_state, 'iteration_history') and len(st.session_state.iteration_history) > 1:
                 col1, col2, col3 = st.columns([3, 2, 1])
 
@@ -553,14 +620,82 @@ def main():
             citations = current_metadata.get('citations', [])
             display_content_with_citations(st.session_state.current_content, citations, user_sources)
 
-            # Botones de descarga (solo Word y PDF)
+            # Botones de descarga con rating de 5 estrellas
             st.markdown("---")
-            col1, col2 = st.columns(2)
+            col1, col2, col3 = st.columns([1, 1, 1])
 
             iteration = st.session_state.get('iteration_count', 1)
 
-            # Word
+            # ✅ Rating de 5 estrellas - ACTUALIZA registro existente
             with col1:
+                st.markdown("**⭐ Califica este contenido:**")
+
+                # Obtener el OpenAI call ID del contenido actual
+                current_openai_call_id = current_metadata.get('openai_call_id', '')
+
+                # ✅ NEW: Clickable star rating system
+                # Get current rating from session state (None by default)
+                current_rating = st.session_state.get(f'content_rating_{iteration}', None)
+
+                # Create 5 clickable stars with better styling
+                star_cols = st.columns([1, 1, 1, 1, 1])
+                new_rating = None
+
+                # Add custom CSS for better star appearance
+                st.markdown("""
+                <style>
+                .star-button {
+                    font-size: 24px !important;
+                    border: none !important;
+                    background: transparent !important;
+                    padding: 2px !important;
+                    margin: 0 !important;
+                }
+                .star-button:hover {
+                    transform: scale(1.1) !important;
+                    transition: transform 0.1s !important;
+                }
+                </style>
+                """, unsafe_allow_html=True)
+
+                for i in range(1, 6):
+                    with star_cols[i-1]:
+                        # Determine star appearance
+                        if current_rating is not None and i <= current_rating:
+                            star_display = "⭐"  # Filled star
+                            button_type = "primary"
+                        else:
+                            star_display = "☆"   # Empty star
+                            button_type = "secondary"
+
+                        # Create clickable star button
+                        if st.button(
+                            star_display,
+                            key=f"star_{iteration}_{i}",
+                            help=f"Calificar con {i} estrella{'s' if i > 1 else ''}",
+                            use_container_width=True,
+                            type=button_type
+                        ):
+                            new_rating = i
+
+                # Handle rating changes
+                if new_rating is not None:
+                    # Update session state
+                    st.session_state[f'content_rating_{iteration}'] = new_rating
+
+                    # Update database using OpenAI call ID (multi-user safe)
+                    if current_openai_call_id:
+                        success = update_content_rating_by_openai_id(current_openai_call_id, new_rating)
+                        if success:
+                            st.success(f"✅ Rating actualizado: {new_rating}/5 estrellas")
+                            st.rerun()  # Refresh to show updated stars
+                        else:
+                            st.error("⚠️ Error actualizando rating")
+                    else:
+                        st.warning("⚠️ No se puede actualizar rating - falta OpenAI call ID")
+
+            # Word
+            with col2:
                 if EXPORT_AVAILABLE:
                     word_doc = create_word_document(st.session_state.current_content, current_metadata)
                     if word_doc:
@@ -576,7 +711,7 @@ def main():
                     st.button("📄 Word (No disponible)", disabled=True, key=f"word_disabled_iter_{iteration}", use_container_width=True)
 
             # PDF
-            with col2:
+            with col3:
                 if EXPORT_AVAILABLE:
                     pdf_doc = create_pdf_document(st.session_state.current_content, current_metadata)
                     if pdf_doc:
@@ -596,38 +731,51 @@ def main():
             st.markdown("---")
             st.subheader("💬 ¿Qué te pareció la nota? ¿Quisieras realizar algún ajuste?")
 
-            # Solo el feedback, sin sugerencias
-            feedback_key = f"feedback_iteration_{st.session_state.get('iteration_count', 1)}"
-            user_feedback = st.text_area(
-                "Comparte tu feedback específico:",
-                height=100,
-                placeholder="Ejemplo: El título podría ser más llamativo, agregar más datos de INEGI sobre el impacto económico, incluir cifras específicas de turistas, mencionar destinos específicos como Tulum o Puerto Escondido...",
-                key=feedback_key
-            )
+            # Usar formulario para Ctrl+Enter en feedback
+            with st.form("feedback_form", clear_on_submit=False):
+                feedback_key = f"feedback_iteration_{st.session_state.get('iteration_count', 1)}"
+                user_feedback = st.text_area(
+                    "Comparte tu feedback específico:",
+                    height=100,
+                    placeholder="Ejemplo: El título podría ser más llamativo, agregar más datos de INEGI sobre el impacto económico, incluir cifras específicas de turistas, mencionar destinos específicos como Tulum o Puerto Escondido...",
+                    key=feedback_key,
+                    help="💡 Tip: Usa Ctrl+Enter para aplicar mejoras directamente"
+                )
 
-            # Información sobre consistencia editorial
-            st.info("💡 **Nota**: Las mejoras mantendrán automáticamente el tono, estilo y lineamientos editoriales de Once Noticias mientras aplican tu feedback.")
+                # Información sobre consistencia editorial
+                st.info("💡 **Nota**: Las mejoras mantendrán automáticamente el tono, estilo y lineamientos editoriales de Once Noticias mientras aplican tu feedback.")
 
-            # Botones optimizados
-            col1, col2, col3 = st.columns([1, 1, 1])
+                # Botones dentro del formulario
+                col1, col2, col3 = st.columns([1, 1, 1])
 
-            with col1:
-                improve_button_key = f"improve_button_iter_{st.session_state.get('iteration_count', 1)}"
-                if st.button("🚀 Mejorar Contenido", type="primary", use_container_width=True, key=improve_button_key):
-                    if user_feedback:
-                        # Marcar que estamos procesando para ocultar feedback
-                        st.session_state.processing_improvement = True
-                        st.rerun()
-                    else:
-                        st.warning("⚠️ Por favor, proporciona feedback específico para mejorar el contenido")
+                with col1:
+                    improve_button = st.form_submit_button(
+                        "🚀 Mejorar Contenido",
+                        type="primary",
+                        use_container_width=True
+                    )
 
-            with col3:
-                if st.button("🗑️ Comenzar Nuevo Contenido", use_container_width=True, key=f"new_content_iter_{st.session_state.get('iteration_count', 1)}"):
-                    # Limpiar session_state
-                    for key in ['current_content', 'current_metadata', 'iteration_count', 'processing_improvement', 'iteration_history', 'current_iteration']:
-                        if key in st.session_state:
-                            del st.session_state[key]
+                with col3:
+                    new_content_button = st.form_submit_button(
+                        "🗑️ Comenzar Nuevo Contenido",
+                        use_container_width=True
+                    )
+
+            # Procesar botones fuera del formulario
+            if improve_button:
+                if user_feedback:
+                    # Marcar que estamos procesando para ocultar feedback
+                    st.session_state.processing_improvement = True
                     st.rerun()
+                else:
+                    st.warning("⚠️ Por favor, proporciona feedback específico para mejorar el contenido")
+
+            if new_content_button:
+                # Limpiar session_state
+                for key in ['current_content', 'current_metadata', 'iteration_count', 'processing_improvement', 'iteration_history', 'current_iteration']:
+                    if key in st.session_state:
+                        del st.session_state[key]
+                st.rerun()
 
         else:
             # Mostrar progreso y procesar mejora
@@ -639,6 +787,9 @@ def main():
 
             if user_feedback:
                 try:
+                    # Marcar tiempo de inicio
+                    start_time = time.time()
+
                     # Obtener configuración de búsqueda web actual (usar la del selectbox en la UI)
                     force_web_search = get_web_search_setting()
 
@@ -654,10 +805,30 @@ def main():
                         force_web_search=force_web_search
                     )
 
+                    # Calcular tiempo de generación
+                    generation_time = time.time() - start_time
+
                     improved_content = content_data.get("content", "")
                     improved_tokens = content_data.get("token_count", 0)
                     improved_citations = content_data.get("citations", [])
                     improved_web_search_used = content_data.get("web_search_used", False)
+
+                    # Preparar datos completos para guardar
+                    improvement_data = {
+                        **content_data,
+                        "user_prompt": current_metadata.get('user_prompt', ''),
+                        "user_sources": current_metadata.get('user_sources', ''),
+                        "user_feedback": user_feedback,
+                        "category": current_metadata.get('category', ''),
+                        "subcategory": current_metadata.get('subcategory', ''),
+                        "text_type": current_metadata.get('text_type', ''),
+                        "selected_length": current_metadata.get('length_setting', 'auto'),
+                        "generation_time": generation_time,
+                        "improvement_applied": True
+                    }
+
+                    # ✅ GUARDAR CONTENIDO MEJORADO - crea NUEVO registro
+                    new_record_id = save_new_content_metrics(prompt_system, improvement_data, user_rating=None)
 
                     # Actualizar session_state con el contenido mejorado
                     st.session_state.current_content = improved_content
@@ -665,19 +836,23 @@ def main():
                         "token_count": improved_tokens,
                         "last_feedback": user_feedback,
                         "citations": improved_citations,
-                        "web_search_used": improved_web_search_used
+                        "web_search_used": improved_web_search_used,
+                        "record_id": new_record_id,  # ✅ NUEVO ID PARA EL CONTENIDO MEJORADO
+                        "openai_call_id": content_data.get("openai_call_id", "")  # ✅ NUEVO OPENAI CALL ID
                     })
                     st.session_state.iteration_count += 1
                     st.session_state.processing_improvement = False
 
-                    # ✅ NUEVO: Guardar nueva iteración en historial
+                    # Guardar nueva iteración en historial
                     new_iteration = st.session_state.iteration_count
                     st.session_state.iteration_history[new_iteration] = {
                         "content": improved_content,
                         "metadata": st.session_state.current_metadata.copy(),
                         "timestamp": datetime.now().isoformat(),
                         "feedback_applied": user_feedback[:200],  # Primeros 200 chars del feedback
-                        "web_search_config": st.session_state.get('web_search_mode', '🤖 Auto (recomendado)')
+                        "web_search_config": st.session_state.get('web_search_mode', '🤖 Auto (recomendado)'),
+                        "record_id": new_record_id,  # ✅ NUEVO ID EN EL HISTORIAL
+                        "openai_call_id": content_data.get("openai_call_id", "")  # ✅ TRACK OPENAI CALL ID
                     }
                     st.session_state.current_iteration = new_iteration
 
