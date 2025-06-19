@@ -108,6 +108,8 @@ class OptimizedOnceNoticiasPromptSystem:
             "APERTURA_ENERGIA": "La Secretaría de Energía inauguró/Se reportó {logro}",
             "APERTURA_COMERCIO": "México y {país} firmaron/Las exportaciones {resultado}",
             "APERTURA_GOBIERNO": "El gobierno federal {anuncio}/La administración {acción}",
+            "APERTURA_DEPORTES": "El/La {atleta/equipo} {logro} en {competencia}/Se disputó {evento}",
+            "APERTURA_ESPECTACULOS": "El/La {artista} {acción} en {evento}/Se estrena {producción}",
             "CIERRE_FACTUAL": "último dato relevante sin conclusión editorial",
             "CIERRE_CONTEXTUAL": "proyección futura o implicación basada en datos"
         }
@@ -137,6 +139,12 @@ class OptimizedOnceNoticiasPromptSystem:
                 "apertura": "Descripción vívida situando al lector",
                 "tono": "Narrativo inmersivo con observaciones del cronista",
                 "cierre": "Imagen potente o reflexión significativa"
+            },
+            "Copy Redes Sociales": {
+                "estructura": "Gancho inicial → mensaje clave → llamado a la acción",
+                "apertura": "Pregunta, dato impactante o emoji contextual 🔍",
+                "tono": "Breve, atractivo y conversacional; voz institucional ligera",
+                "cierre": "Hashtags, @menciones oficiales y enlace acortado"
             }
         }
 
@@ -186,6 +194,16 @@ class OptimizedOnceNoticiasPromptSystem:
                 "fuentes": ["comunicados oficiales", "secretarías"],
                 "datos": "políticas públicas + implementación",
                 "enfoque": "transparencia institucional"
+            },
+            "Deportes": {
+                "fuentes": ["CONADE", "federaciones deportivas", "clubes profesionales", "LIGA MX", "FIFA"],
+                "datos": "marcadores, estadísticas, récords, tabla de posiciones",
+                "enfoque": "rendimiento de atletas/equipos e impacto en afición mexicana"
+            },
+            "Espectáculos": {
+                "fuentes": ["agencias de entretenimiento", "productoras", "cuentas verificadas de artistas"],
+                "datos": "fechas de estreno, recaudaciones, premios, asistencia a eventos",
+                "enfoque": "cultura pop, cine, música y relevancia para la audiencia nacional"
             }
         }
 
@@ -240,6 +258,16 @@ class OptimizedOnceNoticiasPromptSystem:
                 "parent": "Economía",
                 "fuentes_adicionales": ["BMV", "analistas bursátiles"],
                 "enfoque_especifico": "indicadores financieros + inversionistas"
+            },
+            "Electoral": {
+                "parent": "Gobierno",
+                "fuentes_adicionales": ["INE", "Tribunal Electoral", "partidos políticos"],
+                "enfoque_especifico": "procesos electorales, campañas y resultados preliminares"
+            },
+            "Ninguna": {
+                "parent": None,
+                "fuentes_adicionales": [],
+                "enfoque_especifico": "sin sesgo temático; aplicar solo lineamientos de la categoría principal"
             }
         }
 
@@ -249,7 +277,8 @@ class OptimizedOnceNoticiasPromptSystem:
                 "Nota Periodística": "Breve: 1-2 min lectura, 2-3 párrafos",
                 "Artículo": "Extenso: 2-4 min lectura, 3-8 secciones",
                 "Guión de TV": "Conciso: 30-90 seg oral, fragmentos",
-                "Crónica": "Variable según narrativa completa"
+                "Crónica": "Variable según narrativa completa",
+                "Copy Redes Sociales": "Muy breve: 1 post, máximo 280 caracteres o 3-4 líneas"
             },
             "corta": "100-300 palabras, priorizar esencial",
             "media": "301-500 palabras, desarrollo balanceado",
@@ -353,6 +382,19 @@ class OptimizedOnceNoticiasPromptSystem:
                     data_result["latest_data"] += f"💰 Banxico: {banxico_data}\n"
                     data_result["verified_sources"].append("Banxico")
 
+            # Datos específicos para nuevas categorías
+            if category == "Deportes":
+                sports_data = self._query_sports_api(topic)
+                if sports_data:
+                    data_result["latest_data"] += f"⚽ Deportes: {sports_data}\n"
+                    data_result["verified_sources"].append("fuentes deportivas")
+
+            if category == "Espectáculos":
+                entertainment_data = self._query_entertainment_api(topic)
+                if entertainment_data:
+                    data_result["latest_data"] += f"🎬 Espectáculos: {entertainment_data}\n"
+                    data_result["verified_sources"].append("industria del entretenimiento")
+
             # News API para contexto reciente
             news_data = self._query_news_api(topic, category)
             if news_data:
@@ -443,6 +485,54 @@ class OptimizedOnceNoticiasPromptSystem:
 
             # Implementación simplificada - expandir con News API real
             return f"Contexto reciente sobre {topic} en {category} - Implementar News API"
+
+        except Exception as e:
+            return None
+
+    def _query_sports_api(self, topic: str) -> Optional[str]:
+        """Consulta APIs deportivas para resultados, estadísticas y calendarios"""
+        try:
+            if "sports_api" not in self.external_apis:
+                return None
+
+            # Fuentes deportivas relevantes para México
+            sports_indicators = {
+                "liga_mx": "resultados y tabla de posiciones Liga MX",
+                "seleccion": "partidos y estadísticas Selección Nacional",
+                "futbol": "resultados internacionales relevantes",
+                "olimpicos": "medallero y participación mexicana",
+                "box": "peleas y rankings de boxeadores mexicanos"
+            }
+
+            for keyword, description in sports_indicators.items():
+                if keyword in topic.lower():
+                    return f"Datos deportivos {keyword}: {description} - Implementar API deportiva real"
+
+            return f"Datos deportivos generales sobre {topic} - Implementar API deportiva"
+
+        except Exception as e:
+            return None
+
+    def _query_entertainment_api(self, topic: str) -> Optional[str]:
+        """Consulta APIs de entretenimiento para estrenos, premios y eventos"""
+        try:
+            if "entertainment_api" not in self.external_apis:
+                return None
+
+            # Indicadores de entretenimiento relevantes
+            entertainment_indicators = {
+                "cine": "estrenos, taquilla y premios cinematográficos",
+                "musica": "lanzamientos, charts y conciertos",
+                "television": "ratings, estrenos y premios TV",
+                "teatro": "temporadas y producciones teatrales",
+                "festival": "festivales culturales y eventos artísticos"
+            }
+
+            for keyword, description in entertainment_indicators.items():
+                if keyword in topic.lower():
+                    return f"Datos entretenimiento {keyword}: {description} - Implementar API entretenimiento real"
+
+            return f"Datos entretenimiento sobre {topic} - Implementar API entretenimiento"
 
         except Exception as e:
             return None
@@ -649,11 +739,18 @@ TAREA: Generar versión mejorada que:
         pattern = self.content_patterns[text_type]
         category_config = self.category_patterns.get(category, {})
 
+        # Interpolación especial para Copy Redes Sociales
+        apertura = pattern['apertura']
+        if text_type == "Copy Redes Sociales":
+            apertura = pattern['apertura']  # No necesita interpolación de variables
+        else:
+            apertura = self._interpolate_variables(pattern['apertura'], category)
+
         structure_reminder = f"""
 ESTRUCTURA: {pattern['estructura']}
-APERTURA: {self._interpolate_variables(pattern['apertura'], category)}
+APERTURA: {apertura}
 TONO: {pattern['tono']}
-CIERRE: {self._interpolate_variables(pattern['cierre'], category)}
+CIERRE: {self._interpolate_variables(pattern['cierre'], category) if '{' in pattern['cierre'] else pattern['cierre']}
 FUENTES TÍPICAS: {', '.join(category_config.get('fuentes', []))}
 ENFOQUE: {category_config.get('enfoque', '')}
 """

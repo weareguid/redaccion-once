@@ -51,17 +51,20 @@ class OnceNoticiasConfig:
     # Configuración de categorías
     CATEGORIES = [
         "Comercio", "Economía", "Energía", "Gobierno",
-        "Internacional", "Política", "Justicia", "Sociedad", "Transporte"
+        "Internacional", "Política", "Justicia", "Sociedad", "Transporte",
+        "Deportes", "Espectáculos"
     ]
 
     SUBCATEGORIES = [
         "Agricultura", "Finanzas", "Empleo", "Medio Ambiente",
         "Infraestructura", "Seguridad", "Comercio Internacional",
-        "Salud", "Inversión Extranjera", "Mercados"
+        "Salud", "Inversión Extranjera", "Mercados",
+        "Electoral", "Ninguna"
     ]
 
     TEXT_TYPES = [
-        "Nota Periodística", "Artículo", "Guión de TV", "Crónica"
+        "Nota Periodística", "Artículo", "Guión de TV", "Crónica",
+        "Copy Redes Sociales"
     ]
 
     LENGTH_OPTIONS = {
