@@ -75,7 +75,7 @@ CREATE TABLE content_generation_log_optimized (
 ### Ejecutar la Aplicación
 
 ```bash
-streamlit run app_optimized.py
+streamlit run app.py
 ```
 
 ### Interfaz Principal

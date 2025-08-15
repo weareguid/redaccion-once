@@ -8,6 +8,7 @@ sqlalchemy>=2.0.0
 plotly>=5.18.0
 python-docx>=1.1.0
 reportlab>=4.1.0
+pyperclip>=1.8.2
 fpdf>=1.7.2
 watchdog==3.0.0
 torch>=2.0.0

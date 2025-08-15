@@ -75,6 +75,33 @@ class OnceNoticiasConfig:
         "Muy larga (801+ palabras)": "muy_larga"
     }
 
+    # Configuración de Supers para TV
+    SUPER_TYPES = {
+        "CG:1L (1 línea - máx. 55 caracteres)": "CG_1L",
+        "CG:2L (2 líneas - máx. 55 caracteres c/u)": "CG_2L",
+        "CG:3L (3 líneas - Estados/Internacional)": "CG_3L",
+        "ALERTA ONCE 1L": "ALERTA_1L",
+        "ALERTA ONCE 2L": "ALERTA_2L",
+        "CONDUCTOR (Nombre y Twitter)": "CONDUCTOR",
+        "FALLA DE ORIGEN (máx. 15 caracteres)": "FALLA_ORIGEN",
+        "SCROLL (Cintillo - máx. 633 caracteres)": "SCROLL"
+    }
+
+    # Límites de caracteres por tipo de super
+    SUPER_CHAR_LIMITS = {
+        "CG_1L": 55,
+        "CG_2L": 55,  # por línea
+        "CG_3L": 55,  # por línea
+        "ALERTA_1L": 55,
+        "ALERTA_2L": 55,  # por línea
+        "CONDUCTOR": 50,  # por línea
+        "FALLA_ORIGEN": 15,
+        "SCROLL": 633
+    }
+
+    # Número de propuestas de supers a generar
+    SUPER_GENERATION_COUNT = 3
+
     @classmethod
     def get_api_key(cls, key_name: str) -> str:
         """Obtiene API keys de forma segura desde Streamlit secrets o variables de entorno"""

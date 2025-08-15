@@ -619,10 +619,10 @@ def main():
             # Mostrar contenido actual con citaciones
             citations = current_metadata.get('citations', [])
             display_content_with_citations(st.session_state.current_content, citations, user_sources)
-
+            
             # Botones de descarga con rating de 5 estrellas
             st.markdown("---")
-            col1, col2, col3 = st.columns([1, 1, 1])
+            col1, col2, col3 = st.columns([2, 1, 1])
 
             iteration = st.session_state.get('iteration_count', 1)
 
@@ -638,7 +638,7 @@ def main():
                 current_rating = st.session_state.get(f'content_rating_{iteration}', None)
 
                 # Create 5 clickable stars with better styling
-                star_cols = st.columns([1, 1, 1, 1, 1])
+                star_cols = st.columns(5)
                 new_rating = None
 
                 # Add custom CSS for better star appearance
@@ -694,37 +694,43 @@ def main():
                     else:
                         st.warning("⚠️ No se puede actualizar rating - falta OpenAI call ID")
 
-            # Word
+            # Word - con alineación vertical
             with col2:
-                if EXPORT_AVAILABLE:
-                    word_doc = create_word_document(st.session_state.current_content, current_metadata)
-                    if word_doc:
-                        st.download_button(
+                # Contenedor con alineación vertical bottom
+                container = st.container()
+                with container:
+                    if EXPORT_AVAILABLE:
+                        word_doc = create_word_document(st.session_state.current_content, current_metadata)
+                        if word_doc:
+                            st.download_button(
                             label="📄 Descargar Word",
                             data=word_doc,
                             file_name=f"contenido_{current_metadata.get('category', '')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx",
                             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                             key=f"download_word_iter_{iteration}",
                             use_container_width=True
-                        )
-                else:
-                    st.button("📄 Word (No disponible)", disabled=True, key=f"word_disabled_iter_{iteration}", use_container_width=True)
+                            )
+                    else:
+                        st.button("📄 Word (No disponible)", disabled=True, key=f"word_disabled_iter_{iteration}", use_container_width=True)
 
-            # PDF
+            # PDF - con alineación vertical
             with col3:
-                if EXPORT_AVAILABLE:
-                    pdf_doc = create_pdf_document(st.session_state.current_content, current_metadata)
-                    if pdf_doc:
-                        st.download_button(
+                # Contenedor con alineación vertical bottom
+                container = st.container()
+                with container:
+                    if EXPORT_AVAILABLE:
+                        pdf_doc = create_pdf_document(st.session_state.current_content, current_metadata)
+                        if pdf_doc:
+                            st.download_button(
                             label="📑 Descargar PDF",
                             data=pdf_doc,
                             file_name=f"contenido_{current_metadata.get('category', '')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
                             mime="application/pdf",
                             key=f"download_pdf_iter_{iteration}",
                             use_container_width=True
-                        )
-                else:
-                    st.button("📑 PDF (No disponible)", disabled=True, key=f"pdf_disabled_iter_{iteration}", use_container_width=True)
+                            )
+                    else:
+                        st.button("📑 PDF (No disponible)", disabled=True, key=f"pdf_disabled_iter_{iteration}", use_container_width=True)
 
         # ===== SECCIÓN DE FEEDBACK (SOLO SI NO ESTÁ PROCESANDO) =====
         if not st.session_state.get('processing_improvement', False):
@@ -867,6 +873,117 @@ def main():
                     st.session_state.processing_improvement = False
                     st.error(f"❌ Error al mejorar contenido: {str(e)}")
                     st.rerun()
+        
+        # ===== SECCIÓN DE GENERACIÓN DE SUPERS (AL FINAL) =====
+        # Solo mostrar si hay contenido generado y no está procesando mejoras
+        if hasattr(st.session_state, 'current_content') and st.session_state.current_content and not st.session_state.get('processing_improvement', False):
+            st.markdown("---")
+            st.subheader("🎬 Generación de Supers para TV")
+            
+            # Crear columnas para el selector y botón (sin límite de caracteres)
+            col_super1, col_super2 = st.columns([3, 1])
+            
+            with col_super1:
+                # Dropdown para seleccionar tipo de super
+                selected_super_type = st.selectbox(
+                    "Selecciona el tipo de super:",
+                    options=list(config.SUPER_TYPES.keys()),
+                    key=f"super_type_selector_{st.session_state.get('iteration_count', 1)}",
+                    help="Elige el formato de super según las necesidades de producción"
+                )
+            
+            with col_super2:
+                # Botón para generar supers - sin espaciado extra
+                generate_supers_button = st.button(
+                    "🎬 Generar Supers",
+                    key=f"generate_supers_{st.session_state.get('iteration_count', 1)}",
+                    type="primary",
+                    use_container_width=True
+                )
+            
+            # Generar supers si se presiona el botón
+            if generate_supers_button:
+                with st.spinner("🔄 Generando propuestas de supers..."):
+                    try:
+                        # Obtener el tipo de super seleccionado
+                        super_type_code = config.SUPER_TYPES[selected_super_type]
+                        
+                        # Generar supers usando el prompt system
+                        super_result = prompt_system.generate_supers_for_content(
+                            news_content=st.session_state.current_content,
+                            super_type=super_type_code,
+                            category=st.session_state.current_metadata.get('category', ''),
+                            num_proposals=config.SUPER_GENERATION_COUNT
+                        )
+                        
+                        # Guardar en session state
+                        st.session_state[f'generated_supers_{st.session_state.get("iteration_count", 1)}'] = super_result
+                        
+                        if super_result.get('success', False):
+                            st.success(f"✅ Se generaron {len(super_result.get('proposals', []))} propuestas de supers")
+                        else:
+                            st.warning("⚠️ Se generaron propuestas de respaldo (sin conexión a OpenAI)")
+                    
+                    except Exception as e:
+                        st.error(f"❌ Error al generar supers: {str(e)}")
+            
+            # Mostrar supers generados si existen (versión compacta)
+            supers_key = f'generated_supers_{st.session_state.get("iteration_count", 1)}'
+            if supers_key in st.session_state:
+                super_data = st.session_state[supers_key]
+                proposals = super_data.get('proposals', [])
+                
+                if proposals:
+                    st.markdown("### 📺 Propuestas de Supers")
+                    
+                    # Mostrar cada propuesta de forma compacta
+                    for idx, proposal in enumerate(proposals, 1):
+                        col1, col2 = st.columns([5, 1])
+                        
+                        with col1:
+                            # Mostrar el texto formateado SIN el icono de copiar de streamlit
+                            # Para CG:3L, mostrar las líneas separadas para claridad
+                            if proposal['type'] == 'CG_3L':
+                                # Mostrar formato con líneas separadas para mejor visualización
+                                display_text = f"[CG :3L NOTICIAS 2025\n  {proposal['content'].get('section', 'NACIONAL')}\n  {proposal['content'].get('location', '')}\n  {proposal['content'].get('topic', '')}]"
+                                st.text(display_text)
+                            else:
+                                # Para otros tipos, mostrar formato normal
+                                st.text(proposal['formatted'])
+                        
+                        with col2:
+                            # Botón de copiar siempre visible
+                            button_key = f"copy_super_{idx}_{st.session_state.get('iteration_count', 1)}"
+                            
+                            if st.button(
+                                "📋 Copiar",
+                                key=button_key,
+                                use_container_width=True,
+                                help="Copiar al portapapeles"
+                            ):
+                                # Copiar al portapapeles usando diferentes métodos
+                                import platform
+                                import subprocess
+                                
+                                try:
+                                    if platform.system() == 'Windows':
+                                        # En Windows, usar el comando clip
+                                        process = subprocess.Popen(['clip'], stdin=subprocess.PIPE, text=True, shell=True)
+                                        process.communicate(input=proposal['formatted'])
+                                    else:
+                                        # En otros sistemas, intentar con pyperclip
+                                        import pyperclip
+                                        pyperclip.copy(proposal['formatted'])
+                                    
+                                    # Mostrar confirmación temporal usando placeholder
+                                    placeholder = st.empty()
+                                    placeholder.success("✅ Copiado al portapapeles")
+                                    time.sleep(2)
+                                    placeholder.empty()
+                                    
+                                except Exception as e:
+                                    # Just pass silently if copy fails
+                                    pass
 
 if __name__ == "__main__":
     main()

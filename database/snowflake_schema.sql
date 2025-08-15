@@ -50,7 +50,15 @@ CREATE OR REPLACE TABLE content_generation_log_optimized (
     calidad_periodistica_score FLOAT,
     relevancia_audiencia_score FLOAT,
     completitud_informativa_score FLOAT,
-    identidad_editorial_score FLOAT
+    identidad_editorial_score FLOAT,
+    
+    -- Métricas de Supers para TV
+    super_type VARCHAR(50),           -- Tipo de super generado (CG_1L, CG_2L, etc.)
+    super_proposals TEXT,              -- JSON con las propuestas generadas
+    super_selected INTEGER,            -- Índice del super seleccionado por el usuario (1-3)
+    super_generation_time FLOAT,       -- Tiempo de generación de supers en segundos
+    super_tokens_used INTEGER,         -- Tokens utilizados para generar supers
+    super_openai_call_id VARCHAR(100) -- ID de llamada OpenAI para generación de supers
 );
 
 -- ===== VISTA ANALÍTICA: SATISFACCIÓN DEL USUARIO =====
@@ -200,3 +208,9 @@ COMMENT ON COLUMN content_generation_log_optimized.user_rating IS 'Rating del us
 COMMENT ON COLUMN content_generation_log_optimized.web_search_used IS 'Indica si se utilizó búsqueda web para generar el contenido';
 COMMENT ON COLUMN content_generation_log_optimized.citations_data IS 'Datos JSON de las citaciones obtenidas via web search';
 COMMENT ON COLUMN content_generation_log_optimized.openai_call_id IS 'ID único de la llamada a OpenAI API para tracking';
+COMMENT ON COLUMN content_generation_log_optimized.super_type IS 'Tipo de super televisivo generado (CG_1L, CG_2L, CG_3L, ALERTA, SCROLL, etc.)';
+COMMENT ON COLUMN content_generation_log_optimized.super_proposals IS 'JSON array con las propuestas de supers generadas, incluyendo formato y validación';
+COMMENT ON COLUMN content_generation_log_optimized.super_selected IS 'Índice (1-3) del super seleccionado por el usuario de las propuestas generadas';
+COMMENT ON COLUMN content_generation_log_optimized.super_generation_time IS 'Tiempo en segundos que tomó generar las propuestas de supers';
+COMMENT ON COLUMN content_generation_log_optimized.super_tokens_used IS 'Cantidad de tokens OpenAI utilizados para generar los supers';
+COMMENT ON COLUMN content_generation_log_optimized.super_openai_call_id IS 'ID único de la llamada a OpenAI específica para generación de supers';

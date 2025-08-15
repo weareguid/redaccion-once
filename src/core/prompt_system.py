@@ -1237,3 +1237,268 @@ CONTEXTO: Esta es una mejora iterativa que debe mantener TODOS los lineamientos 
                 "web_search_used": False,
                 "openai_call_id": ""
             }
+    
+    def generate_supers_for_content(self, news_content: str, super_type: str, 
+                                   category: str, num_proposals: int = 3) -> Dict:
+        """
+        Genera propuestas de supers televisivos para el contenido generado
+        
+        Args:
+            news_content: Contenido de la noticia generada
+            super_type: Tipo de super (CG_1L, CG_2L, CG_3L, etc.)
+            category: Categoría de la noticia
+            num_proposals: Número de propuestas a generar (default 3)
+            
+        Returns:
+            Dict con las propuestas generadas y metadata
+        """
+        try:
+            from src.core.super_generation import SuperGenerator
+            
+            # Inicializar generador de supers
+            super_gen = SuperGenerator()
+            
+            # Obtener instrucciones específicas del tipo
+            instructions = super_gen.type_instructions.get(super_type, "")
+            char_limit = super_gen.char_limits.get(super_type, 55)
+            
+            # Extraer información clave del contenido
+            key_info = super_gen.extract_key_info(news_content, category)
+            
+            # Crear prompt especializado para OpenAI
+            system_prompt = f"""Eres un experto en producción televisiva de Once Noticias.
+            Tu tarea es generar supers (texto sobreimpreso) para notas periodísticas televisivas.
+            
+            LINEAMIENTOS CANAL ONCE:
+            - Los supers deben captar la atención rápidamente
+            - Información clara, precisa y concisa
+            - Evitar tecnicismos innecesarios
+            - Lenguaje accesible y directo
+            - Destacar lo más importante de la noticia
+            
+            {instructions}
+            
+            LÍMITES DE CARACTERES:
+            - Cada línea: máximo {char_limit} caracteres
+            - NO exceder estos límites bajo ninguna circunstancia
+            """
+            
+            # Construir prompt de usuario con contexto
+            user_prompt = f"""Genera {num_proposals} propuestas diferentes de supers tipo {super_type} para esta noticia:
+            
+            NOTICIA:
+            {news_content[:1500]}
+            
+            CATEGORÍA: {category}
+            UBICACIÓN: {key_info.get('location', 'México')}
+            DATOS CLAVE: {', '.join(key_info.get('data', [])[:5])}
+            
+            IMPORTANTE:
+            1. Genera exactamente {num_proposals} propuestas diferentes
+            2. Cada propuesta debe tener un enfoque distinto
+            3. Respetar el formato y límites de caracteres
+            4. Usar MAYÚSCULAS para los supers
+            5. No incluir comillas ni caracteres especiales innecesarios
+            
+            """
+            
+            # Formato específico según tipo
+            if super_type == "CG_1L":
+                user_prompt += """Formato de respuesta (una línea por propuesta):
+                PROPUESTA 1: [texto del super]
+                PROPUESTA 2: [texto del super]
+                PROPUESTA 3: [texto del super]"""
+                
+            elif super_type == "CG_2L":
+                user_prompt += """Formato de respuesta:
+                PROPUESTA 1:
+                LÍNEA 1: [texto primera línea]
+                LÍNEA 2: [texto segunda línea]
+                
+                PROPUESTA 2:
+                LÍNEA 1: [texto primera línea]
+                LÍNEA 2: [texto segunda línea]
+                
+                PROPUESTA 3:
+                LÍNEA 1: [texto primera línea]
+                LÍNEA 2: [texto segunda línea]"""
+                
+            elif super_type == "CG_3L":
+                section = "INTERNACIONAL" if category == "Internacional" else "NACIONAL"
+                user_prompt += f"""Formato de respuesta:
+                PROPUESTA 1:
+                LÍNEA 1: {section}
+                LÍNEA 2: [estado/país]
+                LÍNEA 3: [tema principal]
+                
+                PROPUESTA 2:
+                LÍNEA 1: {section}
+                LÍNEA 2: [estado/país]
+                LÍNEA 3: [tema principal]
+                
+                PROPUESTA 3:
+                LÍNEA 1: {section}
+                LÍNEA 2: [estado/país]
+                LÍNEA 3: [tema principal]"""
+                
+            elif super_type == "SCROLL":
+                user_prompt += """Formato de respuesta:
+                PROPUESTA 1: [noticia1] * [noticia2] * [noticia3] * ...
+                PROPUESTA 2: [noticia1] * [noticia2] * [noticia3] * ...
+                PROPUESTA 3: [noticia1] * [noticia2] * [noticia3] * ..."""
+            
+            # Llamar a OpenAI
+            response = self.client.chat.completions.create(
+                model=config.OPENAI_MODEL,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.3,  # Baja temperatura para mayor consistencia
+                max_tokens=500,
+                top_p=0.9
+            )
+            
+            # Extraer OpenAI call ID
+            openai_call_id = response.id if hasattr(response, 'id') else ""
+            
+            # Parsear respuesta
+            generated_text = response.choices[0].message.content
+            proposals = self._parse_super_proposals(generated_text, super_type, super_gen)
+            
+            return {
+                "proposals": proposals,
+                "super_type": super_type,
+                "category": category,
+                "token_count": response.usage.total_tokens,
+                "openai_call_id": openai_call_id,
+                "success": True
+            }
+            
+        except Exception as e:
+            print(f"Error generando supers: {e}")
+            
+            # Generar propuestas de fallback
+            from src.core.super_generation import SuperGenerator
+            super_gen = SuperGenerator()
+            fallback_proposals = super_gen.generate_super_proposals(
+                super_type, news_content, category, num_proposals
+            )
+            
+            return {
+                "proposals": fallback_proposals,
+                "super_type": super_type,
+                "category": category,
+                "token_count": 0,
+                "openai_call_id": "",
+                "success": False,
+                "error": str(e)
+            }
+    
+    def _parse_super_proposals(self, generated_text: str, super_type: str, super_gen) -> List[Dict]:
+        """
+        Parsea las propuestas generadas por OpenAI
+        
+        Args:
+            generated_text: Texto generado por OpenAI
+            super_type: Tipo de super
+            super_gen: Instancia de SuperGenerator
+            
+        Returns:
+            Lista de propuestas parseadas y formateadas
+        """
+        proposals = []
+        
+        # Dividir por propuestas
+        prop_patterns = [
+            r"PROPUESTA \d+:",
+            r"Propuesta \d+:",
+            r"\d+\.",
+            r"\d+\)"
+        ]
+        
+        # Encontrar separadores de propuestas
+        sections = []
+        for pattern in prop_patterns:
+            if re.search(pattern, generated_text):
+                sections = re.split(pattern, generated_text)
+                break
+        
+        if not sections:
+            sections = [generated_text]
+        
+        # Procesar cada sección
+        for section in sections[1:]:  # Saltar primera sección vacía
+            if not section.strip():
+                continue
+                
+            proposal = {
+                "type": super_type,
+                "content": {},
+                "formatted": "",
+                "valid": True,
+                "char_count": {}
+            }
+            
+            # Parsear según tipo
+            if super_type == "CG_1L":
+                content_text = section.strip()
+                # Limpiar y extraer contenido
+                content_text = re.sub(r'^\[.*?\]', '', content_text).strip()
+                proposal["content"]["content"] = content_text[:55]
+                
+            elif super_type == "CG_2L":
+                lines = re.findall(r'LÍNEA \d+: (.+)', section)
+                if len(lines) >= 2:
+                    proposal["content"]["line1"] = lines[0].strip()[:55]
+                    proposal["content"]["line2"] = lines[1].strip()[:55]
+                else:
+                    # Intentar con saltos de línea simples
+                    lines = section.strip().split('\n')
+                    if lines:
+                        proposal["content"]["line1"] = lines[0].strip()[:55]
+                        proposal["content"]["line2"] = lines[1].strip()[:55] if len(lines) > 1 else ""
+                        
+            elif super_type == "CG_3L":
+                lines = re.findall(r'LÍNEA \d+: (.+)', section)
+                if len(lines) >= 3:
+                    proposal["content"]["section"] = lines[0].strip()
+                    proposal["content"]["location"] = lines[1].strip()[:55]
+                    proposal["content"]["topic"] = lines[2].strip()[:55]
+                else:
+                    # Valores por defecto
+                    proposal["content"]["section"] = "NACIONAL"
+                    proposal["content"]["location"] = "MÉXICO"
+                    proposal["content"]["topic"] = section.strip()[:55]
+                    
+            elif super_type == "SCROLL":
+                content_text = section.strip()
+                proposal["content"]["content"] = content_text[:633]
+            
+            else:
+                # Otros tipos
+                proposal["content"]["content"] = section.strip()[:55]
+            
+            # Formatear y validar
+            proposal["formatted"] = super_gen.format_super(super_type, proposal["content"])
+            
+            # Contar caracteres
+            for key, value in proposal["content"].items():
+                proposal["char_count"][key] = len(value)
+            
+            # Validar longitudes
+            for key, value in proposal["content"].items():
+                limit = super_gen.char_limits.get(super_type, 55)
+                if len(value) > limit:
+                    proposal["valid"] = False
+                    
+            proposals.append(proposal)
+        
+        # Si no se parsearon suficientes propuestas, usar generador de fallback
+        if len(proposals) < 3:
+            fallback_proposals = super_gen.generate_super_proposals(
+                super_type, "", category="", num_proposals=3-len(proposals)
+            )
+            proposals.extend(fallback_proposals)
+        
+        return proposals[:3]  # Retornar máximo 3 propuestas
