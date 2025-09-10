@@ -302,6 +302,123 @@ def create_pdf_document(content: str, metadata: Dict) -> io.BytesIO:
     buffer.seek(0)
     return buffer
 
+def render_super_generation_ui(content, metadata, iteration_key, prompt_system):
+    """
+    Renderiza la interfaz de generación de supers (reutilizable)
+    
+    Args:
+        content: Contenido de la nota periodística
+        metadata: Metadatos del contenido (categoría, etc.)
+        iteration_key: Clave única para evitar conflictos de session state
+        prompt_system: Sistema de prompts para generar supers
+    """
+    st.markdown("---")
+    st.subheader("🎬 Generación de Supers para TV")
+    
+    # Crear columnas para el selector y botón
+    col_super1, col_super2 = st.columns([3, 1])
+    
+    with col_super1:
+        # Dropdown para seleccionar tipo de super
+        selected_super_type = st.selectbox(
+            "Selecciona el tipo de super:",
+            options=list(config.SUPER_TYPES.keys()),
+            key=f"super_type_selector_{iteration_key}",
+            help="Elige el formato de super según las necesidades de producción"
+        )
+    
+    with col_super2:
+        # Botón para generar supers
+        generate_supers_button = st.button(
+            "🎬 Generar Supers",
+            key=f"generate_supers_{iteration_key}",
+            type="primary",
+            use_container_width=True
+        )
+    
+    # Generar supers si se presiona el botón
+    if generate_supers_button:
+        with st.spinner("🔄 Generando propuestas de supers..."):
+            try:
+                # Obtener el tipo de super seleccionado
+                super_type_code = config.SUPER_TYPES[selected_super_type]
+                
+                # Generar supers usando el prompt system
+                super_result = prompt_system.generate_supers_for_content(
+                    news_content=content,
+                    super_type=super_type_code,
+                    category=metadata.get('category', 'General'),
+                    num_proposals=config.SUPER_GENERATION_COUNT
+                )
+                
+                # Guardar en session state
+                st.session_state[f'generated_supers_{iteration_key}'] = super_result
+                
+                if super_result.get('success', False):
+                    proposals_count = len(super_result.get('proposals', []))
+                    if proposals_count > 0:
+                        st.success(f"✅ Se generaron {proposals_count} propuestas de supers")
+                    else:
+                        st.warning("⚠️ No se pudieron generar propuestas. Verifica tu conexión a OpenAI.")
+                else:
+                    error_msg = super_result.get('error', 'Error desconocido')
+                    st.error(f"❌ Error al generar supers: {error_msg}")
+            
+            except Exception as e:
+                st.error(f"❌ Error al generar supers: {str(e)}")
+    
+    # Mostrar supers generados si existen
+    supers_key = f'generated_supers_{iteration_key}'
+    if supers_key in st.session_state:
+        super_data = st.session_state[supers_key]
+        proposals = super_data.get('proposals', [])
+        
+        if proposals:
+            st.markdown("### 📺 Propuestas de Supers")
+            
+            # Mostrar cada propuesta de forma compacta
+            for idx, proposal in enumerate(proposals, 1):
+                col1, col2 = st.columns([5, 1])
+                
+                with col1:
+                    # Mostrar el texto formateado con los backslashes correctos
+                    # Todos los tipos usan el formato ya preparado con backslashes
+                    st.text(proposal['formatted'])
+                
+                with col2:
+                    # Botón de copiar
+                    button_key = f"copy_super_{idx}_{iteration_key}"
+                    
+                    if st.button(
+                        "📋 Copiar",
+                        key=button_key,
+                        use_container_width=True,
+                        help="Copiar al portapapeles"
+                    ):
+                        # Copiar al portapapeles
+                        import platform
+                        import subprocess
+                        
+                        try:
+                            if platform.system() == 'Windows':
+                                # En Windows, usar el comando clip
+                                process = subprocess.Popen(['clip'], stdin=subprocess.PIPE, text=True, shell=True)
+                                process.communicate(input=proposal['formatted'])
+                            else:
+                                # En otros sistemas, intentar con pyperclip
+                                import pyperclip
+                                pyperclip.copy(proposal['formatted'])
+                            
+                            # Mostrar confirmación temporal
+                            placeholder = st.empty()
+                            placeholder.success("✅ Copiado al portapapeles")
+                            time.sleep(2)
+                            placeholder.empty()
+                            
+                        except Exception as e:
+                            # Just pass silently if copy fails
+                            pass
+
 def main():
     """Función principal de la aplicación"""
 
@@ -312,281 +429,283 @@ def main():
     st.title("📰 Once Noticias - Sistema Editorial Optimizado")
     st.markdown("*Reducción de 60% en tokens • Mayor velocidad • Calidad mejorada*")
 
-    # Configuración del contenido
-    col1, col2 = st.columns([2, 1])
+    # Crear tabs para los dos modos
+    tab1, tab2 = st.tabs(["📰 Nota + Super", "🎬 Solo Super"])
+    
+    # TAB 1: Modo completo (generación de nota + super)
+    with tab1:
+        # Configuración del contenido
+        col1, col2 = st.columns([2, 1])
 
-    with col1:
-        st.subheader("🎯 Configuración del Contenido")
+        with col1:
+            st.subheader("🎯 Configuración del Contenido")
 
-        # Selección de parámetros
-        category = st.selectbox(
-            "Categoría",
-            config.CATEGORIES,
-            index=1  # Economía por defecto
-        )
-
-        subcategory = st.selectbox(
-            "Subcategoría",
-            config.SUBCATEGORIES,
-            index=1  # Finanzas por defecto
-        )
-
-        text_type = st.selectbox(
-            "Tipo de Texto",
-            config.TEXT_TYPES,
-            index=0  # Nota Periodística por defecto
-        )
-
-        # Selección de longitud
-        length_option = st.selectbox(
-            "Longitud del Contenido",
-            list(config.LENGTH_OPTIONS.keys()),
-            index=0  # Auto por defecto
-        )
-        selected_length = config.LENGTH_OPTIONS[length_option]
-
-    with col2:
-        st.subheader("⚙️ Configuración Avanzada")
-
-        # Control de búsqueda web
-        web_search_mode = st.selectbox(
-            "🔍 Búsqueda Web",
-            ["🤖 Auto (recomendado)", "🌐 Siempre activada", "📚 Solo conocimiento base"],
-            index=0,
-            help="Auto: usa web search cuando sea necesario. Siempre: búsqueda web en cada generación. Solo base: sin búsqueda web."
-        )
-
-        # Guardar configuración en session_state para persistencia
-        st.session_state.web_search_mode = web_search_mode
-
-        # Mostrar configuración de almacenamiento
-        storage_info = prompt_system.get_storage_status()
-        st.info(f"📁 {storage_info['status']}")
-
-        # Opción para cambiar modo de almacenamiento
-        if st.button("🔄 Cambiar Almacenamiento"):
-            st.session_state.show_storage_config = not st.session_state.get('show_storage_config', False)
-
-    # Configuración de almacenamiento expandible
-    if st.session_state.get('show_storage_config', False):
-        with st.expander("🗄️ Configuración de Almacenamiento", expanded=True):
-            storage_mode = st.radio(
-                "Modo de Almacenamiento",
-                ["Solo Local", "Solo Snowflake (si está configurado)", "Ambos"],
-                index=0
+            # Selección de parámetros
+            category = st.selectbox(
+                "Categoría",
+                config.CATEGORIES,
+                index=1  # Economía por defecto
             )
 
-            if storage_mode == "Solo Snowflake (si está configurado)":
-                if not config.is_database_available():
-                    st.warning("⚠️ Snowflake no está configurado. Se usará almacenamiento local.")
-                else:
-                    st.success("✅ Snowflake disponible")
+            subcategory = st.selectbox(
+                "Subcategoría",
+                config.SUBCATEGORIES,
+                index=1  # Finanzas por defecto
+            )
 
-            st.info("💡 El almacenamiento local siempre está disponible como respaldo")
+            text_type = st.selectbox(
+                "Tipo de Texto",
+                config.TEXT_TYPES,
+                index=0  # Nota Periodística por defecto
+            )
 
-    # Usar formulario para Ctrl+Enter en input principal
-    st.subheader("✍️ Solicitud Editorial")
+            # Selección de longitud
+            length_option = st.selectbox(
+                "Longitud del Contenido",
+                list(config.LENGTH_OPTIONS.keys()),
+                index=0  # Auto por defecto
+            )
+            selected_length = config.LENGTH_OPTIONS[length_option]
 
-    with st.form("content_generation_form", clear_on_submit=False):
-        user_prompt = st.text_area(
-            "Describe el contenido que necesitas generar:",
-            height=100,
-            placeholder="Ejemplo: Análisis del impacto de las nuevas políticas comerciales en el sector energético mexicano...",
-            help="💡 Tip: Usa Ctrl+Enter para generar contenido directamente"
-        )
+        with col2:
+            st.subheader("⚙️ Configuración Avanzada")
 
-        # Campo para fuentes y referencias
-        st.subheader("📚 Fuentes y Referencias (Opcional)")
-        user_sources = st.text_area(
-            "Comparte fuentes, links, datos o referencias específicas:",
-            height=80,
-            placeholder="Ejemplo: Reporte INEGI 2024, https://example.com/data, cifras del Banco de México, estudio de la UNAM sobre energías renovables...",
-            help="Estas fuentes se integrarán al contenido junto con la búsqueda web automática"
-        )
+            # Control de búsqueda web
+            web_search_mode = st.selectbox(
+                "🔍 Búsqueda Web",
+                ["🤖 Auto (recomendado)", "🌐 Siempre activada", "📚 Solo conocimiento base"],
+                index=0,
+                help="Auto: usa web search cuando sea necesario. Siempre: búsqueda web en cada generación. Solo base: sin búsqueda web."
+            )
 
-        # Botón de generación dentro del formulario
-        generate_button = st.form_submit_button(
-            "🚀 Generar Contenido",
-            type="primary",
-            use_container_width=True
-        )
+            # Guardar configuración en session_state para persistencia
+            st.session_state.web_search_mode = web_search_mode
 
-    # Procesamiento de la solicitud
-    if generate_button and user_prompt:
+            # Mostrar configuración de almacenamiento
+            storage_info = prompt_system.get_storage_status()
+            st.info(f"📁 {storage_info['status']}")
 
-        with st.spinner("🔄 Generando contenido..."):
+            # Opción para cambiar modo de almacenamiento
+            if st.button("🔄 Cambiar Almacenamiento"):
+                st.session_state.show_storage_config = not st.session_state.get('show_storage_config', False)
 
-            try:
-                # Marcar tiempo de inicio
-                start_time = time.time()
-
-                # Determinar si usar Web Search basado en la selección del usuario
-                force_web_search = get_web_search_setting()
-
-                # Generar contenido con Web Search
-                content_data = prompt_system.generate_content_with_web_search(
-                    category=category,
-                    subcategory=subcategory,
-                    text_type=text_type,
-                    user_prompt=user_prompt,
-                    sources=user_sources,
-                    selected_length=selected_length,
-                    force_web_search=force_web_search
+        # Configuración de almacenamiento expandible
+        if st.session_state.get('show_storage_config', False):
+            with st.expander("🗄️ Configuración de Almacenamiento", expanded=True):
+                storage_mode = st.radio(
+                    "Modo de Almacenamiento",
+                    ["Solo Local", "Solo Snowflake (si está configurado)", "Ambos"],
+                    index=0
                 )
 
-                # Calcular tiempo de generación
-                generation_time = time.time() - start_time
+                if storage_mode == "Solo Snowflake (si está configurado)":
+                    if not config.is_database_available():
+                        st.warning("⚠️ Snowflake no está configurado. Se usará almacenamiento local.")
+                    else:
+                        st.success("✅ Snowflake disponible")
 
-                generated_content = content_data.get("content", "")
-                token_count = content_data.get("token_count", 0)
-                citations = content_data.get("citations", [])
-                web_search_used = content_data.get("web_search_used", False)
+                st.info("💡 El almacenamiento local siempre está disponible como respaldo")
 
-                # Preparar datos completos para guardar
-                complete_content_data = {
-                    **content_data,
-                    "user_prompt": user_prompt,
-                    "user_sources": user_sources,
-                    "category": category,
-                    "subcategory": subcategory,
-                    "text_type": text_type,
-                    "selected_length": selected_length,
-                    "generation_time": generation_time,
-                    "improvement_applied": False
-                }
+        # Usar formulario para Ctrl+Enter en input principal
+        st.subheader("✍️ Solicitud Editorial")
 
-                # ✅ GUARDAR NUEVO CONTENIDO - crea nuevo registro
-                record_id = save_new_content_metrics(prompt_system, complete_content_data, user_rating=None)
+        with st.form("content_generation_form", clear_on_submit=False):
+            user_prompt = st.text_area(
+                "Describe el contenido que necesitas generar:",
+                height=100,
+                placeholder="Ejemplo: Análisis del impacto de las nuevas políticas comerciales en el sector energético mexicano...",
+                help="💡 Tip: Usa Ctrl+Enter para generar contenido directamente"
+            )
 
-                # Guardar en session_state para flujo iterativo
-                st.session_state.current_content = generated_content
-                st.session_state.current_metadata = {
-                    "user_prompt": user_prompt,
-                    "user_sources": user_sources,
-                    "category": category,
-                    "subcategory": subcategory,
-                    "text_type": text_type,
-                    "token_count": token_count,
-                    "length_setting": selected_length,
-                    "citations": citations,
-                    "web_search_used": web_search_used,
-                    "generation_time": generation_time,
-                    "record_id": record_id,  # ✅ GUARDAR EL ID DEL REGISTRO
-                    "openai_call_id": content_data.get("openai_call_id", "")  # ✅ TRACK OPENAI CALL ID
-                }
-                st.session_state.iteration_count = 1
+            # Campo para fuentes y referencias
+            st.subheader("📚 Fuentes y Referencias (Opcional)")
+            user_sources = st.text_area(
+                "Comparte fuentes, links, datos o referencias específicas:",
+                height=80,
+                placeholder="Ejemplo: Reporte INEGI 2024, https://example.com/data, cifras del Banco de México, estudio de la UNAM sobre energías renovables...",
+                help="Estas fuentes se integrarán al contenido junto con la búsqueda web automática"
+            )
 
-                # Inicializar historial de iteraciones
-                st.session_state.iteration_history = {
-                    1: {
-                        "content": generated_content,
-                        "metadata": st.session_state.current_metadata.copy(),
-                        "timestamp": datetime.now().isoformat(),
-                        "feedback_applied": "Contenido inicial",
-                        "web_search_config": st.session_state.get('web_search_mode', '🤖 Auto (recomendado)'),
-                        "record_id": record_id,  # ✅ GUARDAR EL ID EN EL HISTORIAL
+            # Botón de generación dentro del formulario
+            generate_button = st.form_submit_button(
+                "🚀 Generar Contenido",
+                type="primary",
+                use_container_width=True
+            )
+
+        # Procesamiento de la solicitud
+        if generate_button and user_prompt:
+            with st.spinner("🔄 Generando contenido..."):
+                try:
+                    # Marcar tiempo de inicio
+                    start_time = time.time()
+
+                    # Determinar si usar Web Search basado en la selección del usuario
+                    force_web_search = get_web_search_setting()
+
+                    # Generar contenido con Web Search
+                    content_data = prompt_system.generate_content_with_web_search(
+                        category=category,
+                        subcategory=subcategory,
+                        text_type=text_type,
+                        user_prompt=user_prompt,
+                        sources=user_sources,
+                        selected_length=selected_length,
+                        force_web_search=force_web_search
+                    )
+
+                    # Calcular tiempo de generación
+                    generation_time = time.time() - start_time
+
+                    generated_content = content_data.get("content", "")
+                    token_count = content_data.get("token_count", 0)
+                    citations = content_data.get("citations", [])
+                    web_search_used = content_data.get("web_search_used", False)
+
+                    # Preparar datos completos para guardar
+                    complete_content_data = {
+                        **content_data,
+                        "user_prompt": user_prompt,
+                        "user_sources": user_sources,
+                        "category": category,
+                        "subcategory": subcategory,
+                        "text_type": text_type,
+                        "selected_length": selected_length,
+                        "generation_time": generation_time,
+                        "improvement_applied": False
+                    }
+
+                    # ✅ GUARDAR NUEVO CONTENIDO - crea nuevo registro
+                    record_id = save_new_content_metrics(prompt_system, complete_content_data, user_rating=None)
+
+                    # Guardar en session_state para flujo iterativo
+                    st.session_state.current_content = generated_content
+                    st.session_state.current_metadata = {
+                        "user_prompt": user_prompt,
+                        "user_sources": user_sources,
+                        "category": category,
+                        "subcategory": subcategory,
+                        "text_type": text_type,
+                        "token_count": token_count,
+                        "length_setting": selected_length,
+                        "citations": citations,
+                        "web_search_used": web_search_used,
+                        "generation_time": generation_time,
+                        "record_id": record_id,  # ✅ GUARDAR EL ID DEL REGISTRO
                         "openai_call_id": content_data.get("openai_call_id", "")  # ✅ TRACK OPENAI CALL ID
                     }
-                }
-                st.session_state.current_iteration = 1
+                    st.session_state.iteration_count = 1
 
-                # Mostrar solo éxito (el contenido se mostrará en la sección "Contenido Actual")
-                if web_search_used:
-                    st.success("✅ Contenido generado exitosamente con información actualizada de la web")
-                else:
-                    st.success("✅ Contenido generado exitosamente")
-                st.info("📄 Ve abajo para ver tu contenido y poder mejorarlo iterativamente")
+                    # Inicializar historial de iteraciones
+                    st.session_state.iteration_history = {
+                        1: {
+                            "content": generated_content,
+                            "metadata": st.session_state.current_metadata.copy(),
+                            "timestamp": datetime.now().isoformat(),
+                            "feedback_applied": "Contenido inicial",
+                            "web_search_config": st.session_state.get('web_search_mode', '🤖 Auto (recomendado)'),
+                            "record_id": record_id,  # ✅ GUARDAR EL ID EN EL HISTORIAL
+                            "openai_call_id": content_data.get("openai_call_id", "")  # ✅ TRACK OPENAI CALL ID
+                        }
+                    }
+                    st.session_state.current_iteration = 1
 
-            except Exception as e:
-                st.error(f"❌ Error al generar contenido: {str(e)}")
-                st.error("Verifica tu configuración de OpenAI y conexión a internet")
+                    # Mostrar solo éxito (el contenido se mostrará en la sección "Contenido Actual")
+                    if web_search_used:
+                        st.success("✅ Contenido generado exitosamente con información actualizada de la web")
+                    else:
+                        st.success("✅ Contenido generado exitosamente")
+                    st.info("📄 Ve abajo para ver tu contenido y poder mejorarlo iterativamente")
 
-    elif generate_button and not user_prompt:
-        st.warning("⚠️ Por favor, ingresa una solicitud editorial")
+                except Exception as e:
+                    st.error(f"❌ Error al generar contenido: {str(e)}")
+                    st.error("Verifica tu configuración de OpenAI y conexión a internet")
 
-    # ===== SECCIÓN DE CONTENIDO ACTUAL Y MEJORA ITERATIVA =====
-    if hasattr(st.session_state, 'current_content') and st.session_state.current_content:
+        elif generate_button and not user_prompt:
+            st.warning("⚠️ Por favor, ingresa una solicitud editorial")
 
-        # Contenedor para scroll automático
-        content_container = st.container()
+        # ===== SECCIÓN DE CONTENIDO ACTUAL Y MEJORA ITERATIVA =====
+        if hasattr(st.session_state, 'current_content') and st.session_state.current_content:
+            # Contenedor para scroll automático
+            content_container = st.container()
 
-        with content_container:
-            st.markdown("---")
+            with content_container:
+                st.markdown("---")
 
-            # SELECTOR DE ITERACIONES
-            if hasattr(st.session_state, 'iteration_history') and len(st.session_state.iteration_history) > 1:
-                col1, col2, col3 = st.columns([3, 2, 1])
+                # SELECTOR DE ITERACIONES
+                if hasattr(st.session_state, 'iteration_history') and len(st.session_state.iteration_history) > 1:
+                    col1, col2, col3 = st.columns([3, 2, 1])
 
-                with col1:
-                    st.subheader("📄 Contenido Actual")
+                    with col1:
+                        st.subheader("📄 Contenido Actual")
 
-                with col2:
-                    # Selector de iteración más compacto
-                    available_iterations = list(st.session_state.iteration_history.keys())
-                    current_iteration = st.session_state.get('current_iteration', max(available_iterations))
+                    with col2:
+                        # Selector de iteración más compacto
+                        available_iterations = list(st.session_state.iteration_history.keys())
+                        current_iteration = st.session_state.get('current_iteration', max(available_iterations))
 
-                    # Formato más compacto
-                    col2a, col2b = st.columns([1, 1])
-                    with col2a:
-                        selected_iteration = st.selectbox(
-                            "Ver versión:",
-                            available_iterations,
-                            index=available_iterations.index(current_iteration),
-                            key="iteration_selector",
-                            format_func=lambda x: f"#{x}"
-                        )
+                        # Formato más compacto
+                        col2a, col2b = st.columns([1, 1])
+                        with col2a:
+                            selected_iteration = st.selectbox(
+                                "Ver versión:",
+                                available_iterations,
+                                index=available_iterations.index(current_iteration),
+                                key="iteration_selector",
+                                format_func=lambda x: f"#{x}"
+                            )
 
-                    with col2b:
-                        st.markdown(f"<small style='color: #666; margin-top: 24px; display: block;'>de {len(available_iterations)} total</small>", unsafe_allow_html=True)
+                        with col2b:
+                            st.markdown(f"<small style='color: #666; margin-top: 24px; display: block;'>de {len(available_iterations)} total</small>", unsafe_allow_html=True)
 
-                    # Actualizar iteración actual si cambió
-                    if selected_iteration != st.session_state.get('current_iteration'):
-                        st.session_state.current_iteration = selected_iteration
-                        # Cargar contenido de la iteración seleccionada
-                        selected_data = st.session_state.iteration_history[selected_iteration]
-                        st.session_state.current_content = selected_data["content"]
-                        st.session_state.current_metadata = selected_data["metadata"]
-                        st.rerun()
+                        # Actualizar iteración actual si cambió
+                        if selected_iteration != st.session_state.get('current_iteration'):
+                            st.session_state.current_iteration = selected_iteration
+                            # Cargar contenido de la iteración seleccionada
+                            selected_data = st.session_state.iteration_history[selected_iteration]
+                            st.session_state.current_content = selected_data["content"]
+                            st.session_state.current_metadata = selected_data["metadata"]
+                            st.rerun()
 
-                with col3:
-                    # Mostrar timestamp de la iteración actual
+                    with col3:
+                        # Mostrar timestamp de la iteración actual
+                        current_iter_data = st.session_state.iteration_history[selected_iteration]
+                        timestamp = current_iter_data.get("timestamp", "")
+                        if timestamp:
+                            try:
+                                dt = datetime.fromisoformat(timestamp)
+                                time_str = dt.strftime("%H:%M")
+                                st.markdown(f"<small style='color: #666; margin-top: 24px; display: block;'>{time_str}</small>", unsafe_allow_html=True)
+                            except:
+                                pass
+
+                    # Mostrar información de la iteración seleccionada
                     current_iter_data = st.session_state.iteration_history[selected_iteration]
-                    timestamp = current_iter_data.get("timestamp", "")
-                    if timestamp:
-                        try:
-                            dt = datetime.fromisoformat(timestamp)
-                            time_str = dt.strftime("%H:%M")
-                            st.markdown(f"<small style='color: #666; margin-top: 24px; display: block;'>{time_str}</small>", unsafe_allow_html=True)
-                        except:
-                            pass
+                    feedback_info = current_iter_data.get("feedback_applied", "")
+                    web_config = current_iter_data.get("web_search_config", "")
 
-                # Mostrar información de la iteración seleccionada
-                current_iter_data = st.session_state.iteration_history[selected_iteration]
-                feedback_info = current_iter_data.get("feedback_applied", "")
-                web_config = current_iter_data.get("web_search_config", "")
+                    if feedback_info and feedback_info != "Contenido inicial":
+                        display_info = f"💬 **Mejora aplicada:** {feedback_info[:100]}..."
+                        if web_config:
+                            mode_short = {
+                                '🤖 Auto (recomendado)': 'Auto',
+                                '🌐 Siempre activada': 'Siempre Web',
+                                '📚 Solo conocimiento base': 'Solo Base'
+                            }.get(web_config, 'Auto')
+                            display_info += f" | **Config:** {mode_short}"
+                        st.info(display_info)
 
-                if feedback_info and feedback_info != "Contenido inicial":
-                    display_info = f"💬 **Mejora aplicada:** {feedback_info[:100]}..."
-                    if web_config:
-                        mode_short = {
-                            '🤖 Auto (recomendado)': 'Auto',
-                            '🌐 Siempre activada': 'Siempre Web',
-                            '📚 Solo conocimiento base': 'Solo Base'
-                        }.get(web_config, 'Auto')
-                        display_info += f" | **Config:** {mode_short}"
-                    st.info(display_info)
+                else:
+                    # Título y iteración en la misma línea (caso original)
+                    col1, col2 = st.columns([4, 1])
+                    with col1:
+                        st.subheader("📄 Contenido Actual")
+                    with col2:
+                        st.metric("Iteración", f"#{st.session_state.get('iteration_count', 1)}", label_visibility="collapsed")
 
-            else:
-                # Título y iteración en la misma línea (caso original)
-                col1, col2 = st.columns([4, 1])
-                with col1:
-                    st.subheader("📄 Contenido Actual")
-                with col2:
-                    st.metric("Iteración", f"#{st.session_state.get('iteration_count', 1)}", label_visibility="collapsed")
-
-            # Mostrar información del contenido
-            current_metadata = st.session_state.current_metadata
-            info_text = f"**{current_metadata.get('category', '')} / {current_metadata.get('subcategory', '')}** • **{current_metadata.get('text_type', '')}**"
+                # Mostrar información del contenido
+                current_metadata = st.session_state.current_metadata
+                info_text = f"**{current_metadata.get('category', '')} / {current_metadata.get('subcategory', '')}** • **{current_metadata.get('text_type', '')}**"
 
             # Agregar indicador de Web Search si se usó
             if current_metadata.get('web_search_used', False):
@@ -877,113 +996,57 @@ def main():
         # ===== SECCIÓN DE GENERACIÓN DE SUPERS (AL FINAL) =====
         # Solo mostrar si hay contenido generado y no está procesando mejoras
         if hasattr(st.session_state, 'current_content') and st.session_state.current_content and not st.session_state.get('processing_improvement', False):
-            st.markdown("---")
-            st.subheader("🎬 Generación de Supers para TV")
+            # Usar la función reutilizable para generar supers
+            render_super_generation_ui(
+                content=st.session_state.current_content,
+                metadata=st.session_state.current_metadata,
+                iteration_key=f"tab1_{st.session_state.get('iteration_count', 1)}",
+                prompt_system=prompt_system
+            )
+    
+    # TAB 2: Modo Solo Super (nueva funcionalidad)
+    with tab2:
+        st.subheader("🎬 Generador de Supers para Notas Existentes")
+        st.markdown("Pega aquí una nota periodística ya escrita para generar propuestas de supers televisivos.")
+        
+        # Text area grande para pegar el contenido
+        pasted_content = st.text_area(
+            "📝 Pega aquí la nota periodística:",
+            height=400,
+            placeholder="Copia y pega aquí el contenido completo de la nota periodística para la cual necesitas generar supers...",
+            key="super_only_content"
+        )
+        
+        # Selector de categoría para el contexto
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            category_super_only = st.selectbox(
+                "Categoría de la nota (para mejor contexto):",
+                config.CATEGORIES,
+                index=0,
+                key="super_only_category"
+            )
+        
+        # Si hay contenido pegado, mostrar la UI de generación de supers
+        if pasted_content and len(pasted_content.strip()) > 50:
+            # Crear metadata simple para el contenido pegado
+            super_only_metadata = {
+                'category': category_super_only,
+                'subcategory': '',
+                'text_type': 'Nota Periodística'
+            }
             
-            # Crear columnas para el selector y botón (sin límite de caracteres)
-            col_super1, col_super2 = st.columns([3, 1])
-            
-            with col_super1:
-                # Dropdown para seleccionar tipo de super
-                selected_super_type = st.selectbox(
-                    "Selecciona el tipo de super:",
-                    options=list(config.SUPER_TYPES.keys()),
-                    key=f"super_type_selector_{st.session_state.get('iteration_count', 1)}",
-                    help="Elige el formato de super según las necesidades de producción"
-                )
-            
-            with col_super2:
-                # Botón para generar supers - sin espaciado extra
-                generate_supers_button = st.button(
-                    "🎬 Generar Supers",
-                    key=f"generate_supers_{st.session_state.get('iteration_count', 1)}",
-                    type="primary",
-                    use_container_width=True
-                )
-            
-            # Generar supers si se presiona el botón
-            if generate_supers_button:
-                with st.spinner("🔄 Generando propuestas de supers..."):
-                    try:
-                        # Obtener el tipo de super seleccionado
-                        super_type_code = config.SUPER_TYPES[selected_super_type]
-                        
-                        # Generar supers usando el prompt system
-                        super_result = prompt_system.generate_supers_for_content(
-                            news_content=st.session_state.current_content,
-                            super_type=super_type_code,
-                            category=st.session_state.current_metadata.get('category', ''),
-                            num_proposals=config.SUPER_GENERATION_COUNT
-                        )
-                        
-                        # Guardar en session state
-                        st.session_state[f'generated_supers_{st.session_state.get("iteration_count", 1)}'] = super_result
-                        
-                        if super_result.get('success', False):
-                            st.success(f"✅ Se generaron {len(super_result.get('proposals', []))} propuestas de supers")
-                        else:
-                            st.warning("⚠️ Se generaron propuestas de respaldo (sin conexión a OpenAI)")
-                    
-                    except Exception as e:
-                        st.error(f"❌ Error al generar supers: {str(e)}")
-            
-            # Mostrar supers generados si existen (versión compacta)
-            supers_key = f'generated_supers_{st.session_state.get("iteration_count", 1)}'
-            if supers_key in st.session_state:
-                super_data = st.session_state[supers_key]
-                proposals = super_data.get('proposals', [])
-                
-                if proposals:
-                    st.markdown("### 📺 Propuestas de Supers")
-                    
-                    # Mostrar cada propuesta de forma compacta
-                    for idx, proposal in enumerate(proposals, 1):
-                        col1, col2 = st.columns([5, 1])
-                        
-                        with col1:
-                            # Mostrar el texto formateado SIN el icono de copiar de streamlit
-                            # Para CG:3L, mostrar las líneas separadas para claridad
-                            if proposal['type'] == 'CG_3L':
-                                # Mostrar formato con líneas separadas para mejor visualización
-                                display_text = f"[CG :3L NOTICIAS 2025\n  {proposal['content'].get('section', 'NACIONAL')}\n  {proposal['content'].get('location', '')}\n  {proposal['content'].get('topic', '')}]"
-                                st.text(display_text)
-                            else:
-                                # Para otros tipos, mostrar formato normal
-                                st.text(proposal['formatted'])
-                        
-                        with col2:
-                            # Botón de copiar siempre visible
-                            button_key = f"copy_super_{idx}_{st.session_state.get('iteration_count', 1)}"
-                            
-                            if st.button(
-                                "📋 Copiar",
-                                key=button_key,
-                                use_container_width=True,
-                                help="Copiar al portapapeles"
-                            ):
-                                # Copiar al portapapeles usando diferentes métodos
-                                import platform
-                                import subprocess
-                                
-                                try:
-                                    if platform.system() == 'Windows':
-                                        # En Windows, usar el comando clip
-                                        process = subprocess.Popen(['clip'], stdin=subprocess.PIPE, text=True, shell=True)
-                                        process.communicate(input=proposal['formatted'])
-                                    else:
-                                        # En otros sistemas, intentar con pyperclip
-                                        import pyperclip
-                                        pyperclip.copy(proposal['formatted'])
-                                    
-                                    # Mostrar confirmación temporal usando placeholder
-                                    placeholder = st.empty()
-                                    placeholder.success("✅ Copiado al portapapeles")
-                                    time.sleep(2)
-                                    placeholder.empty()
-                                    
-                                except Exception as e:
-                                    # Just pass silently if copy fails
-                                    pass
+            # Usar la función reutilizable para generar supers
+            render_super_generation_ui(
+                content=pasted_content,
+                metadata=super_only_metadata,
+                iteration_key="super_only",
+                prompt_system=prompt_system
+            )
+        elif pasted_content and len(pasted_content.strip()) <= 50:
+            st.warning("⚠️ Por favor, pega una nota más completa (mínimo 50 caracteres) para generar supers.")
+        else:
+            st.info("💡 Pega una nota periodística en el área de texto de arriba para comenzar a generar supers.")
 
 if __name__ == "__main__":
     main()

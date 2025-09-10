@@ -1278,9 +1278,19 @@ CONTEXTO: Esta es una mejora iterativa que debe mantener TODOS los lineamientos 
             
             {instructions}
             
-            LÍMITES DE CARACTERES:
-            - Cada línea: máximo {char_limit} caracteres
-            - NO exceder estos límites bajo ninguna circunstancia
+            LÍMITES DE CARACTERES CRÍTICOS:
+            - Cada línea: MÁXIMO {char_limit} caracteres (incluyendo espacios)
+            - CADA LÍNEA DEBE SER UNA ORACIÓN COMPLETA Y COHERENTE
+            - Si no cabe en {char_limit} caracteres, usa abreviaciones o reformula
+            - NUNCA generes texto que supere el límite
+            - Es preferible una oración más corta pero completa que una truncada
+            
+            EJEMPLOS DE BUENAS PRÁCTICAS:
+            ✓ BUENO: "MÉXICO LIDERA ADOPCIÓN DE CRIPTOMONEDAS EN AL" (48 chars)
+            ✗ MALO: "MÉXICO LIDERA LA ADOPCIÓN DE CRIPTOMONEDAS EN AMÉRI" (52 chars, palabra cortada)
+            
+            ✓ BUENO: "3.1 MILLONES DE MEXICANOS USAN BITCOIN" (39 chars)
+            ✗ MALO: "3.1 MILLONES DE MEXICANOS UTILIZAN CRIPTOMONEDAS PAR" (53 chars, incompleto)
             """
             
             # Construir prompt de usuario con contexto
@@ -1296,9 +1306,11 @@ CONTEXTO: Esta es una mejora iterativa que debe mantener TODOS los lineamientos 
             IMPORTANTE:
             1. Genera exactamente {num_proposals} propuestas diferentes
             2. Cada propuesta debe tener un enfoque distinto
-            3. Respetar el formato y límites de caracteres
+            3. CADA LÍNEA debe ser menor a {char_limit} caracteres Y ser una oración completa
             4. Usar MAYÚSCULAS para los supers
             5. No incluir comillas ni caracteres especiales innecesarios
+            6. Cuenta los caracteres mientras escribes - NO EXCEDAS EL LÍMITE
+            7. Usa abreviaciones comunes: MX (México), USD (dólares), MM (millones), etc.
             
             """
             
@@ -1347,9 +1359,9 @@ CONTEXTO: Esta es una mejora iterativa que debe mantener TODOS los lineamientos 
                 PROPUESTA 2: [noticia1] * [noticia2] * [noticia3] * ...
                 PROPUESTA 3: [noticia1] * [noticia2] * [noticia3] * ..."""
             
-            # Llamar a OpenAI
+            # Llamar a OpenAI con modelo optimizado para supers
             response = self.client.chat.completions.create(
-                model=config.OPENAI_MODEL,
+                model=config.OPENAI_MODEL,  # Usar modelo principal
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
@@ -1378,15 +1390,9 @@ CONTEXTO: Esta es una mejora iterativa que debe mantener TODOS los lineamientos 
         except Exception as e:
             print(f"Error generando supers: {e}")
             
-            # Generar propuestas de fallback
-            from src.core.super_generation import SuperGenerator
-            super_gen = SuperGenerator()
-            fallback_proposals = super_gen.generate_super_proposals(
-                super_type, news_content, category, num_proposals
-            )
-            
+            # No generar fallback, devolver error directo
             return {
-                "proposals": fallback_proposals,
+                "proposals": [],
                 "super_type": super_type,
                 "category": category,
                 "token_count": 0,
@@ -1445,39 +1451,40 @@ CONTEXTO: Esta es una mejora iterativa que debe mantener TODOS los lineamientos 
                 content_text = section.strip()
                 # Limpiar y extraer contenido
                 content_text = re.sub(r'^\[.*?\]', '', content_text).strip()
-                proposal["content"]["content"] = content_text[:55]
+                # Usar truncate_text en lugar de slice brutal
+                proposal["content"]["content"] = super_gen.truncate_text(content_text, 55)
                 
             elif super_type == "CG_2L":
                 lines = re.findall(r'LÍNEA \d+: (.+)', section)
                 if len(lines) >= 2:
-                    proposal["content"]["line1"] = lines[0].strip()[:55]
-                    proposal["content"]["line2"] = lines[1].strip()[:55]
+                    proposal["content"]["line1"] = super_gen.truncate_text(lines[0].strip(), 55)
+                    proposal["content"]["line2"] = super_gen.truncate_text(lines[1].strip(), 55)
                 else:
                     # Intentar con saltos de línea simples
                     lines = section.strip().split('\n')
                     if lines:
-                        proposal["content"]["line1"] = lines[0].strip()[:55]
-                        proposal["content"]["line2"] = lines[1].strip()[:55] if len(lines) > 1 else ""
+                        proposal["content"]["line1"] = super_gen.truncate_text(lines[0].strip(), 55)
+                        proposal["content"]["line2"] = super_gen.truncate_text(lines[1].strip(), 55) if len(lines) > 1 else ""
                         
             elif super_type == "CG_3L":
                 lines = re.findall(r'LÍNEA \d+: (.+)', section)
                 if len(lines) >= 3:
                     proposal["content"]["section"] = lines[0].strip()
-                    proposal["content"]["location"] = lines[1].strip()[:55]
-                    proposal["content"]["topic"] = lines[2].strip()[:55]
+                    proposal["content"]["location"] = super_gen.truncate_text(lines[1].strip(), 55)
+                    proposal["content"]["topic"] = super_gen.truncate_text(lines[2].strip(), 55)
                 else:
                     # Valores por defecto
                     proposal["content"]["section"] = "NACIONAL"
                     proposal["content"]["location"] = "MÉXICO"
-                    proposal["content"]["topic"] = section.strip()[:55]
+                    proposal["content"]["topic"] = super_gen.truncate_text(section.strip(), 55)
                     
             elif super_type == "SCROLL":
                 content_text = section.strip()
-                proposal["content"]["content"] = content_text[:633]
+                proposal["content"]["content"] = super_gen.truncate_text(content_text, 633)
             
             else:
                 # Otros tipos
-                proposal["content"]["content"] = section.strip()[:55]
+                proposal["content"]["content"] = super_gen.truncate_text(section.strip(), 55)
             
             # Formatear y validar
             proposal["formatted"] = super_gen.format_super(super_type, proposal["content"])
@@ -1494,11 +1501,5 @@ CONTEXTO: Esta es una mejora iterativa que debe mantener TODOS los lineamientos 
                     
             proposals.append(proposal)
         
-        # Si no se parsearon suficientes propuestas, usar generador de fallback
-        if len(proposals) < 3:
-            fallback_proposals = super_gen.generate_super_proposals(
-                super_type, "", category="", num_proposals=3-len(proposals)
-            )
-            proposals.extend(fallback_proposals)
-        
+        # No usar fallback, retornar las propuestas que se hayan generado
         return proposals[:3]  # Retornar máximo 3 propuestas
