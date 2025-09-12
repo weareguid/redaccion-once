@@ -7,10 +7,6 @@ import time
 import pandas as pd
 import sqlite3
 from datetime import datetime
-import snowflake.connector
-from snowflake.connector import DictCursor
-from snowflake.sqlalchemy import URL
-from sqlalchemy import create_engine, text
 import plotly.express as px
 import plotly.graph_objects as go
 from io import BytesIO
@@ -48,238 +44,110 @@ if 'rating' not in st.session_state:
 if 'comments' not in st.session_state:
     st.session_state.comments = ""
 
-# Initialize OpenAI
-try:
-    openai.api_key = st.secrets["OPENAI"]["api_key"]
-    # Initialize the OpenAI client
-    client = OpenAI(
-        api_key=st.secrets["OPENAI"]["api_key"]
-    )
-except Exception as e:
-    st.error(f"Error initializing OpenAI: {str(e)}")
-    st.stop()
-
-# Create SQLAlchemy engine for Snowflake
-def get_snowflake_engine():
+# Initialize OpenAI with error handling
+def get_openai_client():
     try:
-        # First connect without database to create it if needed
-        conn = snowflake.connector.connect(
-            user=st.secrets["SNOWFLAKE"]["user"],
-            password=st.secrets["SNOWFLAKE"]["password"],
-            account=st.secrets["SNOWFLAKE"]["account"],
-            warehouse=st.secrets["SNOWFLAKE"]["warehouse"]
-        )
+        # Try to get API key from secrets first, then environment variables
+        api_key = None
+        try:
+            api_key = st.secrets["OPENAI"]["api_key"]
+        except:
+            api_key = os.getenv("OPENAI_API_KEY")
         
-        # Create database and schema if they don't exist
-        cur = conn.cursor()
-        cur.execute(f"CREATE DATABASE IF NOT EXISTS {st.secrets['SNOWFLAKE']['database']}")
-        cur.execute(f"USE DATABASE {st.secrets['SNOWFLAKE']['database']}")
-        cur.execute(f"CREATE SCHEMA IF NOT EXISTS {st.secrets['SNOWFLAKE']['schema']}")
-        cur.close()
-        conn.close()
-        
-        # Now create engine with the database and schema
-        engine = create_engine(URL(
-            account=st.secrets["SNOWFLAKE"]["account"],
-            user=st.secrets["SNOWFLAKE"]["user"],
-            password=st.secrets["SNOWFLAKE"]["password"],
-            warehouse=st.secrets["SNOWFLAKE"]["warehouse"],
-            database=st.secrets["SNOWFLAKE"]["database"],
-            schema=st.secrets["SNOWFLAKE"]["schema"]
-        ))
-        
-        return engine
+        if not api_key or api_key == "sk-placeholder-key-replace-with-real-key":
+            st.error("⚠️ OpenAI API key not configured. Please add your API key in the secrets or environment variables.")
+            st.info("For local development, update the secrets.toml file. For Streamlit Cloud, add OPENAI_API_KEY in the secrets section.")
+            return None
+            
+        client = OpenAI(api_key=api_key)
+        return client
     except Exception as e:
-        st.error(f"Error creating Snowflake engine: {str(e)}")
+        st.error(f"Error initializing OpenAI: {str(e)}")
         return None
 
-# Snowflake connection function (for non-pandas operations)
-def get_snowflake_connection():
-    try:
-        conn = snowflake.connector.connect(
-            user=st.secrets["SNOWFLAKE"]["user"],
-            password=st.secrets["SNOWFLAKE"]["password"],
-            account=st.secrets["SNOWFLAKE"]["account"],
-            warehouse=st.secrets["SNOWFLAKE"]["warehouse"],
-            database=st.secrets["SNOWFLAKE"]["database"],
-            schema=st.secrets["SNOWFLAKE"]["schema"]
+# Initialize SQLite database for local storage
+def init_sqlite_db():
+    conn = sqlite3.connect('feedback.db')
+    cur = conn.cursor()
+    
+    # Create feedback table
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS feedback (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            rating INTEGER,
+            comments TEXT,
+            generated_text TEXT,
+            category TEXT,
+            text_type TEXT,
+            length TEXT,
+            sources TEXT,
+            tone TEXT,
+            style TEXT,
+            additional_instructions TEXT
         )
-        return conn
-    except Exception as e:
-        st.error(f"Error connecting to Snowflake: {str(e)}")
-        return None
+    """)
+    
+    conn.commit()
+    conn.close()
 
-# Initialize Snowflake tables
-def init_snowflake_tables():
-    try:
-        conn = get_snowflake_connection()
-        if conn:
-            cur = conn.cursor()
-            
-            # Create feedback table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS feedback (
-                    id NUMBER AUTOINCREMENT,
-                    timestamp TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
-                    rating NUMBER,
-                    comments TEXT,
-                    generated_text TEXT,
-                    category TEXT,
-                    text_type TEXT,
-                    length TEXT,
-                    sources TEXT,
-                    tone TEXT,
-                    style TEXT,
-                    additional_instructions TEXT
-                )
-            """)
-            
-            # Create model metrics table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS model_metrics (
-                    id NUMBER AUTOINCREMENT,
-                    model_name TEXT,
-                    model_version TEXT,
-                    training_accuracy FLOAT,
-                    validation_accuracy FLOAT,
-                    last_updated TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()
-                )
-            """)
-            
-            # Create analytics view
-            cur.execute("""
-                CREATE OR REPLACE VIEW feedback_analytics AS
-                SELECT 
-                    category,
-                    text_type,
-                    length,
-                    tone,
-                    style,
-                    AVG(rating) as avg_rating,
-                    COUNT(*) as feedback_count,
-                    COUNT(CASE WHEN rating >= 4 THEN 1 END) as positive_feedback_count
-                FROM feedback
-                GROUP BY category, text_type, length, tone, style
-            """)
-            
-            conn.commit()
-            cur.close()
-            conn.close()
-            st.success("Snowflake tables initialized successfully!")
-    except Exception as e:
-        st.error(f"Error initializing Snowflake tables: {str(e)}")
+# Initialize database
+init_sqlite_db()
 
-# Initialize session state for app refresh and text input
-if 'refresh' not in st.session_state:
-    st.session_state.refresh = False
-if 'sources_input' not in st.session_state:
-    st.session_state.sources_input = ""
-if 'show_feedback' not in st.session_state:
-    st.session_state.show_feedback = False
-if 'feedback_rating' not in st.session_state:
-    st.session_state.feedback_rating = 5
-if 'feedback_comments' not in st.session_state:
-    st.session_state.feedback_comments = ""
-
-# Function to save feedback to Snowflake
+# Function to save feedback to SQLite
 def save_feedback(rating, comments, generated_text, metadata):
     try:
-        conn = get_snowflake_connection()
-        if conn:
-            cur = conn.cursor()
-            cur.execute(f"USE DATABASE {st.secrets['SNOWFLAKE']['database']}")
-            cur.execute(f"USE SCHEMA {st.secrets['SNOWFLAKE']['schema']}")
-            feedback_df = pd.DataFrame([{
-                'rating': int(rating),
-                'comments': str(comments),
-                'generated_text': str(generated_text),
-                'category': str(metadata['category']),
-                'text_type': str(metadata['text_type']),
-                'length': str(metadata['length']),
-                'sources': str(metadata['sources']),
-                'tone': str(metadata['tone']),
-                'style': str(metadata['style']),
-                'additional_instructions': str(metadata['additional_instructions'])
-            }])
-            print("Attempting to write feedback to Snowflake:", feedback_df)
-            success, nchunks, nrows, _ = snowflake.connector.pandas_tools.write_pandas(
-                conn,
-                feedback_df,
-                'FEEDBACK.PUBLIC.FEEDBACK',
-                auto_create_table=False,
-                overwrite=False
-            )
-            print("Write result:", success, nchunks, nrows)
-            conn.close()
-            return success
+        conn = sqlite3.connect('feedback.db')
+        cur = conn.cursor()
+        
+        cur.execute("""
+            INSERT INTO feedback (rating, comments, generated_text, category, text_type, length, sources, tone, style, additional_instructions)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            int(rating),
+            str(comments),
+            str(generated_text),
+            str(metadata['category']),
+            str(metadata['text_type']),
+            str(metadata['length']),
+            str(metadata['sources']),
+            str(metadata['tone']),
+            str(metadata['style']),
+            str(metadata['additional_instructions'])
+        ))
+        
+        conn.commit()
+        conn.close()
+        return True
     except Exception as e:
-        st.error(f"Error saving feedback to Snowflake: {str(e)}")
-        print("Error saving feedback to Snowflake:", str(e))
+        st.error(f"Error saving feedback: {str(e)}")
         return False
 
-# Function to get feedback history from Snowflake
+# Function to get feedback history from SQLite
 def get_feedback_history():
     try:
-        engine = get_snowflake_engine()
-        if engine:
-            with engine.connect() as conn:
-                query = text("""
-                    SELECT 
-                        timestamp,
-                        rating,
-                        comments,
-                        generated_text,
-                        category,
-                        text_type,
-                        length,
-                        sources,
-                        tone,
-                        style,
-                        additional_instructions
-                    FROM FEEDBACK.PUBLIC.FEEDBACK
-                    ORDER BY timestamp DESC
-                """)
-                df = pd.read_sql(query, conn)
-                return df
+        conn = sqlite3.connect('feedback.db')
+        df = pd.read_sql_query("""
+            SELECT 
+                timestamp,
+                rating,
+                comments,
+                generated_text,
+                category,
+                text_type,
+                length,
+                sources,
+                tone,
+                style,
+                additional_instructions
+            FROM feedback
+            ORDER BY timestamp DESC
+        """, conn)
+        conn.close()
+        return df
     except Exception as e:
         st.error(f"Error getting feedback history: {str(e)}")
         return pd.DataFrame()
-
-# Function to get feedback analytics
-def get_feedback_analytics():
-    try:
-        engine = get_snowflake_engine()
-        if engine:
-            with engine.connect() as conn:
-                query = text("""
-                    SELECT *
-                    FROM feedback_analytics
-                    ORDER BY last_feedback_time DESC
-                """)
-                df = pd.read_sql(query, conn)
-                return df
-    except Exception as e:
-        st.error(f"Error getting feedback analytics: {str(e)}")
-        return pd.DataFrame()
-
-# Function to analyze feedback patterns
-def analyze_feedback(feedback_df):
-    if feedback_df.empty:
-        return None
-    
-    analysis = {
-        "overall_rating": feedback_df['rating'].mean(),
-        "rating_trend": feedback_df.sort_values('timestamp')['rating'].tolist(),
-        "category_ratings": feedback_df.groupby('category')['rating'].mean().to_dict(),
-        "text_type_ratings": feedback_df.groupby('text_type')['rating'].mean().to_dict(),
-        "common_comments": feedback_df['comments'].dropna().tolist(),
-        "total_feedback": len(feedback_df),
-        "improvement_rate": (feedback_df['rating'].mean() - 3) / 2 * 100  # Assuming 3 is baseline
-    }
-    return analysis
-
-# Initialize Snowflake tables
-init_snowflake_tables()
 
 # Function to create Word document
 def create_word_doc(text):
@@ -303,14 +171,17 @@ def create_pdf_doc(text):
 # Load training data
 def load_training_data():
     training_data = []
-    with open('training_data.jsonl', 'r', encoding='utf-8') as f:
-        for line in f:
-            try:
-                data = json.loads(line)
-                if 'metadata' in data and data['metadata']:
-                    training_data.append(data)
-            except json.JSONDecodeError:
-                continue
+    try:
+        with open('training_data.jsonl', 'r', encoding='utf-8') as f:
+            for line in f:
+                try:
+                    data = json.loads(line)
+                    if 'metadata' in data and data['metadata']:
+                        training_data.append(data)
+                except json.JSONDecodeError:
+                    continue
+    except FileNotFoundError:
+        st.warning("Training data file not found. Using default examples.")
     return training_data
 
 # Title and description
@@ -417,7 +288,7 @@ Escribe tus instrucciones o el tema sobre el que deseas escribir, y el asistente
 """)
 
 # Add tabs for main content and feedback history
-tab1, tab2, tab3 = st.tabs(["Generar Texto", "Historial de Feedback", "Entrenamiento del Modelo"])
+tab1, tab2 = st.tabs(["Generar Texto", "Historial de Feedback"])
 
 with tab1:
     # Create the text area for user input
@@ -433,13 +304,9 @@ with tab1:
     # Add sources input
     sources_prompt = st.text_area(
         "Fuentes y referencias (opcional):",
-        value=st.session_state.sources_input,
         placeholder="Ingresa las fuentes, referencias o datos específicos que deseas incluir en el texto..."
     )
     st.caption("Nota: Las fuentes proporcionadas son solo para investigación y referencia. Nunca deben ser copiadas directamente en el contenido generado.")
-
-    # Update session state with the current sources input
-    st.session_state.sources_input = sources_prompt
 
     # Create columns for buttons
     col1, col2 = st.columns([1, 3])
@@ -455,19 +322,18 @@ with tab1:
             for key in list(st.session_state.keys()):
                 del st.session_state[key]
             # Initialize new session state
-            st.session_state.refresh = False
             st.session_state.user_input = ""
-            st.session_state.sources_input = ""
             st.session_state.feedback_submitted = False
             # Rerun the app
             st.rerun()
 
-    # If refresh flag is set, clear it and continue
-    if st.session_state.get('refresh', False):
-        st.session_state.refresh = False
-
     if generate_button:
         if user_prompt:
+            # Get OpenAI client
+            client = get_openai_client()
+            if client is None:
+                st.stop()
+                
             with st.spinner("Generando contenido..."):
                 try:
                     # Load training data
@@ -737,25 +603,6 @@ with tab2:
         with col3:
             st.metric("Tipos de Texto", len(feedback_df['text_type'].unique()))
         
-        # Add analytics section
-        st.markdown("### Análisis de Feedback")
-        analytics_df = get_feedback_analytics()
-        
-        if not analytics_df.empty:
-            # Time series of ratings
-            st.markdown("#### Tendencia de Calificaciones")
-            st.line_chart(analytics_df.set_index('date')['avg_rating'])
-            
-            # Category performance
-            st.markdown("#### Rendimiento por Categoría")
-            category_performance = analytics_df.groupby('category')['avg_rating'].mean()
-            st.bar_chart(category_performance)
-            
-            # Text type performance
-            st.markdown("#### Rendimiento por Tipo de Texto")
-            type_performance = analytics_df.groupby('text_type')['avg_rating'].mean()
-            st.bar_chart(type_performance)
-        
         # Display feedback table
         st.markdown("#### Detalles del Feedback")
         st.dataframe(
@@ -780,253 +627,41 @@ with tab2:
     else:
         st.info("Aún no hay feedback registrado.")
 
-with tab3:
-    st.markdown("### Entrenamiento del Modelo")
-    
-    if st.button("Preparar Datos de Entrenamiento"):
-        with st.spinner("Preparando datos..."):
-            if prepare_training_data():
-                st.success("Datos preparados exitosamente")
-            else:
-                st.error("Error al preparar los datos")
-    
-    if st.button("Entrenar Modelo"):
-        with st.spinner("Entrenando modelo..."):
-            model_id = train_model()
-            if model_id:
-                st.success(f"Modelo entrenado exitosamente. ID: {model_id}")
-            else:
-                st.error("Error al entrenar el modelo")
-    
-    # Display model metrics
-    st.markdown("#### Métricas del Modelo")
-    try:
-        engine = get_snowflake_engine()
-        if engine:
-            # Get metrics from our custom table
-            metrics_df = pd.read_sql("""
-                SELECT 
-                    model_name,
-                    model_version,
-                    training_accuracy,
-                    validation_accuracy,
-                    last_updated
-                FROM model_metrics
-                ORDER BY last_updated DESC
-                LIMIT 1
-            """, engine)
-            
-            if not metrics_df.empty:
-                st.metric("Precisión de Entrenamiento", f"{metrics_df['training_accuracy'].iloc[0]:.2%}")
-                st.metric("Precisión de Validación", f"{metrics_df['validation_accuracy'].iloc[0]:.2%}")
-                st.metric("Última Actualización", str(metrics_df['last_updated'].iloc[0]))
-            else:
-                st.info("No hay métricas disponibles para el modelo.")
-    except Exception as e:
-        st.error(f"Error al obtener métricas: {str(e)}")
-    
-    # Model performance visualization
-    st.markdown("#### Rendimiento del Modelo")
-    try:
-        engine = get_snowflake_engine()
-        if engine:
-            # Get performance data using a simpler query
-            performance_df = pd.read_sql("""
-                SELECT 
-                    DATE(timestamp) as date,
-                    AVG(rating) as avg_rating,
-                    COUNT(*) as prediction_count
-                FROM feedback
-                WHERE timestamp >= DATEADD(day, -30, CURRENT_TIMESTAMP())
-                GROUP BY DATE(timestamp)
-                ORDER BY date
-            """, engine)
-            
-            if not performance_df.empty:
-                # Create a simple line chart using plotly
-                fig = go.Figure()
-                fig.add_trace(go.Scatter(
-                    x=performance_df['date'],
-                    y=performance_df['avg_rating'],
-                    mode='lines+markers',
-                    name='Calificación Promedio'
-                ))
-                fig.update_layout(
-                    title='Tendencia de Calificaciones',
-                    xaxis_title='Fecha',
-                    yaxis_title='Calificación Promedio',
-                    hovermode='x'
-                )
-                st.plotly_chart(fig)
-                
-                # Display summary statistics
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.metric("Calificación Promedio", f"{performance_df['avg_rating'].mean():.2f}")
-                with col2:
-                    st.metric("Total de Predicciones", f"{performance_df['prediction_count'].sum():,}")
-            else:
-                st.info("No hay datos de rendimiento disponibles para el período seleccionado.")
-    except Exception as e:
-        st.error(f"Error al obtener datos de rendimiento: {str(e)}")
-
-# Function to prepare training data in Snowflake
-def prepare_training_data():
-    try:
-        conn = get_snowflake_connection()
-        if conn:
-            # Create a view for training data
-            cur = conn.cursor()
-            cur.execute("""
-                CREATE OR REPLACE VIEW training_data_view AS
-                SELECT 
-                    generated_text,
-                    category,
-                    subcategory,
-                    text_type,
-                    length,
-                    rating,
-                    comments,
-                    user_prompt,
-                    timestamp
-                FROM feedback
-                WHERE rating >= 4  -- Only use high-quality examples
-            """)
-            
-            # Create feature engineering view
-            cur.execute("""
-                CREATE OR REPLACE VIEW ml_features AS
-                SELECT 
-                    generated_text,
-                    category,
-                    subcategory,
-                    text_type,
-                    length,
-                    rating,
-                    -- Extract key features from comments
-                    REGEXP_SUBSTR(comments, 'estructura|clarity|relevance|sources|adaptation', 1, 1) as key_feature,
-                    -- Calculate text metrics
-                    LENGTH(generated_text) as text_length,
-                    -- Create category embeddings
-                    HASH(category) as category_embedding,
-                    HASH(subcategory) as subcategory_embedding,
-                    HASH(text_type) as text_type_embedding
-                FROM training_data_view
-            """)
-            
-            conn.commit()
-            conn.close()
-            return True
-    except Exception as e:
-        st.error(f"Error preparing training data: {str(e)}")
-        return False
-
-def train_model():
-    try:
-        conn = get_snowflake_connection()
-        if conn:
-            cur = conn.cursor()
-            # Create training procedure
-            cur.execute("""
-                CREATE OR REPLACE PROCEDURE train_text_model()
-                RETURNS STRING
-                LANGUAGE SQL
-                AS
-                $$
-                DECLARE
-                    model_id STRING;
-                BEGIN
-                    -- Create and train the model
-                    CREATE OR REPLACE MODEL text_generation_model
-                    AS SELECT 
-                        generated_text,
-                        category,
-                        subcategory,
-                        text_type,
-                        length,
-                        rating,
-                        key_feature,
-                        text_length,
-                        category_embedding,
-                        subcategory_embedding,
-                        text_type_embedding
-                    FROM ml_features
-                    WHERE rating >= 4;
-                    -- Get model ID
-                    SELECT model_id INTO :model_id
-                    FROM TABLE(INFORMATION_SCHEMA.MODELS)
-                    WHERE model_name = 'text_generation_model';
-                    -- Insert metrics into model_metrics table
-                    INSERT INTO model_metrics (
-                        model_name,
-                        model_version,
-                        training_accuracy,
-                        validation_accuracy
-                    )
-                    SELECT 
-                        'text_generation_model',
-                        model_id,
-                        0.85,  -- Example accuracy values
-                        0.82
-                    FROM TABLE(INFORMATION_SCHEMA.MODELS)
-                    WHERE model_name = 'text_generation_model';
-                    RETURN model_id;
-                END;
-                $$
-            """)
-            # Execute training
-            cur.execute("CALL train_text_model()")
-            model_id = cur.fetchone()[0]
-            conn.close()
-            return model_id
-    except Exception as e:
-        st.error(f"Error training model: {str(e)}")
-        return None
-
-# Function to get model predictions
-def get_model_predictions(category, subcategory, text_type, length):
-    try:
-        conn = get_snowflake_connection()
-        if conn:
-            cur = conn.cursor()
-            
-            # Get predictions from the model
-            cur.execute("""
-                SELECT 
-                    PREDICT(
-                        text_generation_model,
-                        :category,
-                        :subcategory,
-                        :text_type,
-                        :length
-                    ) as prediction
-            """, {
-                'category': category,
-                'subcategory': subcategory,
-                'text_type': text_type,
-                'length': length
-            })
-            
-            prediction = cur.fetchone()[0]
-            conn.close()
-            return prediction
-    except Exception as e:
-        st.error(f"Error getting predictions: {str(e)}")
-        return None
-
-# Add a sidebar button to test Snowflake connection and show current database/schema/user
+# Add a sidebar with app info
 with st.sidebar:
-    if st.button("Test Snowflake Connection"):
-        try:
-            conn = get_snowflake_connection()
-            if conn:
-                cur = conn.cursor()
-                cur.execute("SELECT CURRENT_DATABASE(), CURRENT_SCHEMA(), CURRENT_USER()")
-                result = cur.fetchone()
-                st.success(f"Connected! Database: {result[0]}, Schema: {result[1]}, User: {result[2]}")
-                cur.close()
-                conn.close()
-            else:
-                st.error("Could not establish a Snowflake connection.")
-        except Exception as e:
-            st.error(f"Connection failed: {e}")
+    st.markdown("## 📊 Información de la App")
+    st.markdown("""
+    **Asistente de Redacción Periodística**
+    
+    Esta aplicación te ayuda a generar contenido periodístico de alta calidad usando IA.
+    
+    **Características:**
+    - Generación de contenido personalizado
+    - Múltiples formatos de texto
+    - Descarga en Word y PDF
+    - Sistema de feedback
+    - Historial de generaciones
+    """)
+    
+    st.markdown("---")
+    st.markdown("### 🔧 Configuración")
+    
+    # Check if API key is configured
+    try:
+        api_key = st.secrets["OPENAI"]["api_key"]
+        if api_key and api_key != "sk-placeholder-key-replace-with-real-key":
+            st.success("✅ OpenAI API configurada")
+        else:
+            st.warning("⚠️ OpenAI API no configurada")
+    except:
+        st.warning("⚠️ OpenAI API no configurada")
+    
+    st.markdown("---")
+    st.markdown("### 📝 Instrucciones")
+    st.markdown("""
+    1. Selecciona la categoría y tipo de texto
+    2. Escribe tus instrucciones
+    3. Haz clic en "Generar"
+    4. Descarga el resultado
+    5. Proporciona feedback para mejorar
+    """)
